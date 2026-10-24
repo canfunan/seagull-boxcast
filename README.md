@@ -55,6 +55,23 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十六+轮真机日志全量统计（2524 行 / 7 天 / 40+ 次连接）
+
+**跨 7 天（10-13~10-25）2524 行日志聚合统计**：
+
+| 指标 | 统计 | 结论 |
+|---|---|---|
+| 授权码 | **3(成功) ×91** / -1(初始) ×86 / 0(tag不符) ×4 | tag 认证成功率 96%——机制稳定 |
+| Accept 线程 | **Cmd ×40**（每次必有）/ VR ×16 / TTS ×15 / Touch ×14 / **Video ×1** / Media ×1 / Data ×1 | **盒子几乎不连 Video 端口——视频全走 Cmd 通道点播（1024xx）** |
+| isHuRate | false ×11（恒定） | 该盒子恒不支持 HU 帧率 |
+| 初始帧率 | 30 ×12（恒定） | 30fps 铁证 |
+| 成功链 | enableWifiConnect:true → MSG_CMD_BOX_HELLO → setBoxAuthorized=3 → ENCODER_START(98313) → initRate=30 | 完整握手路径实证 |
+
+**校准落地**：
+- **`use_standard_video` 默认 true → false**（点播路径优先）——真机上盒子 Video 端口
+  接入率仅 1/40，标准推流路径（131073+ch2）对这个盒子基本不走
+- `SERVER_PORTS` 补 **Data 通道（9341，TODO-CALIBRATE）**——真机 DataAcceptThread 实证存在
+
 ## 第十六轮真机日志实证：TCP 角色反转（手机是服务端！）
 
 **数据来源**：设备上百度互联（com.baidu.carlife.vivo）的 xLog——用户真实连接记录
