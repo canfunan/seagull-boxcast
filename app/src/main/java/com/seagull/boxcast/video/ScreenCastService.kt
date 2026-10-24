@@ -93,7 +93,8 @@ class ScreenCastService : Service() {
                 // 回 INIT_DONE(98317)、等 START(98313) 才推流（VideoMsgHandler 实证）
                 videoSender = VideoSender(conn)
                 handshake = VideoHandshake(conn)
-                val useStandard = intent.getBooleanExtra(EXTRA_USE_STANDARD_VIDEO, true)
+                // 真机日志实证：盒子 Video 端口接入率 1/40，视频全走 Cmd 通道点播（1024xx）→ 默认点播路径
+                val useStandard = intent.getBooleanExtra(EXTRA_USE_STANDARD_VIDEO, false)
                 videoSender?.sendEmptyForeground()
 
                 handshake?.onConfigureEncoder = { hw, hh, hf ->

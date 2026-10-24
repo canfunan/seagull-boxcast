@@ -77,6 +77,8 @@ class BoxConnection(private val appContext: Context) {
             CarlifeFrame.Channel.TTS to 9241,
             CarlifeFrame.Channel.VR to 9242,
             CarlifeFrame.Channel.TOUCH to 9340,
+            // DataAcceptThread（真机实证存在，端口 TODO-CALIBRATE：日志未打印，邻近段推测）
+            7 to 9341,
         )
     }
 
