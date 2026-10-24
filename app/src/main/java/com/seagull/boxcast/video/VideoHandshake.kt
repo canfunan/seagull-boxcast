@@ -37,7 +37,7 @@ class VideoHandshake(private val conn: BoxConnection) {
     /** 编码器实际参数（INIT_DONE 回报给 HU） */
     @Volatile var encWidth = H264Encoder.DEFAULT_WIDTH
     @Volatile var encHeight = H264Encoder.DEFAULT_HEIGHT
-    @Volatile var encFps = H264Encoder.DEFAULT_FPS
+    @Volatile var encFps = H264Encoder.DEFAULT_FPS   // 真机实证 30
 
     var onConfigureEncoder: ((width: Int, height: Int, fps: Int) -> Unit)? = null
     var onStartStreaming: (() -> Unit)? = null

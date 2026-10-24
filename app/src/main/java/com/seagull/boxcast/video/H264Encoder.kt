@@ -28,7 +28,7 @@ class H264Encoder(
         private const val TAG = "H264Encoder"
         const val DEFAULT_WIDTH = 832        // h/g.java: f374a = 832
         const val DEFAULT_HEIGHT = 480       // h/g.java: b = 480
-        const val DEFAULT_FPS = 15           // h/g.java: c = 15
+        const val DEFAULT_FPS = 30           // 真机日志实证 sendInitFrameRate=30（h/g.java 旧默认 15）
         const val DEFAULT_BITRATE = 3_276_800 // h/g.java: d = 3276800
         const val I_FRAME_INTERVAL_MS = 300  // 2026 FEATURE_CONFIG_I_FRAME_INTERVAL=300
         const val MIME = "video/avc"         // t.smali: "video/avc"

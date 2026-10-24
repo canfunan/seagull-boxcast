@@ -64,6 +64,20 @@ class BoxConnection(private val appContext: Context) {
         /** 收发缓冲（ConnectSocket 实证 320KB） */
         private const val SEND_BUFFER_SIZE = 327680
         private const val RECV_BUFFER_SIZE = 327680
+
+        /**
+         * 服务端端口表——**真机日志实证**（ConnectManager: Create Cmd/Video/TTS/VR/Touch/Data
+         * AcceptThread ×6）：手机 app 是 TCP 服务端，盒子主动连这些端口。
+         * 端口值沿用 2021 a/c.java WiFi 端口表实证。
+         */
+        val SERVER_PORTS = mapOf(
+            CarlifeFrame.Channel.CMD to 7240,
+            CarlifeFrame.Channel.VIDEO to 8240,
+            CarlifeFrame.Channel.MEDIA to 9240,
+            CarlifeFrame.Channel.TTS to 9241,
+            CarlifeFrame.Channel.VR to 9242,
+            CarlifeFrame.Channel.TOUCH to 9340,
+        )
     }
 
     sealed interface State {
@@ -79,6 +93,10 @@ class BoxConnection(private val appContext: Context) {
     private var socket: Socket? = null
     private var out: OutputStream? = null
     private var reader: FrameReader? = null
+
+    /** 服务端模式：channel → Socket（每通道一条连接，真机 6 AcceptThread 实证） */
+    private val serverSockets = java.util.concurrent.ConcurrentHashMap<Int, Socket>()
+    private var serverJob: Job? = null
     private var readJob: Job? = null
     private var hbJob: Job? = null
     private var writeThread: Thread? = null
@@ -88,7 +106,7 @@ class BoxConnection(private val appContext: Context) {
      * 独立写队列（对照原版 ConnectSocket.WriteThread 实证：priority 10 + BlockingQueue）。
      * 视频/音频大数据不再阻塞读循环（心跳/控制消息延迟是掉线主因）。
      */
-    private val writeQueue = LinkedBlockingQueue<ByteArray>(256)
+    private val writeQueue = LinkedBlockingQueue<Pair<Int, ByteArray>>(256)
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
@@ -130,6 +148,57 @@ class BoxConnection(private val appContext: Context) {
 
     val authorizedCode: Int
         get() = (state.value as? State.Authorized)?.code ?: BoxTypes.IS_NOT_BOX
+
+    // ---------- 服务端模式（真机实证：盒子主动连手机） ----------
+
+    /**
+     * 起 6 个 Accept 线程（Cmd/Video/TTS/VR/Touch），等盒子接入。
+     * 每个通道独立 socket + 独立读循环；发送按 channel 路由到对应 socket。
+     */
+    fun startServer() {
+        if (serverJob?.isActive == true) return
+        lastHost = "server"
+        serverJob = scope.launch {
+            for ((channel, port) in SERVER_PORTS) {
+                launch(Dispatchers.IO) {
+                    runCatching {
+                        val ss = java.net.ServerSocket(port)
+                        Log.i(TAG, "AcceptThread ch=$channel listening :$port")
+                        while (isActive) {
+                            val s = ss.accept()
+                            s.tcpNoDelay = true
+                            s.keepAlive = true
+                            s.receiveBufferSize = RECV_BUFFER_SIZE
+                            s.sendBufferSize = SEND_BUFFER_SIZE
+                            serverSockets[channel] = s
+                            Log.i(TAG, "AcceptThread ch=$channel accepted ${s.inetAddress}")
+                            // 该通道的读循环
+                            val r = FrameReader()
+                            launch(Dispatchers.IO) {
+                                try {
+                                    while (isActive) {
+                                        val (ch, payload) = r.read(s.getInputStream()) ?: break
+                                        handleFrame(ch, payload)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "ch=$channel read end: ${e.message}")
+                                }
+                                serverSockets.remove(channel)
+                            }
+                            // cmd 通道连上即视为连接建立（Hello 会随后到）
+                            if (channel == CarlifeFrame.Channel.CMD) {
+                                _state.value = State.Connecting("server", port)
+                            }
+                        }
+                    }.onFailure { Log.e(TAG, "AcceptThread ch=$channel fail: ${it.message}") }
+                }
+            }
+        }
+    }
+
+    /** 按 channel 取输出流（服务端模式路由） */
+    private fun channelOut(channel: Int): OutputStream? =
+        serverSockets[channel]?.takeIf { it.isConnected }?.getOutputStream()
 
     // ---------- 连接 ----------
 
@@ -194,10 +263,17 @@ class BoxConnection(private val appContext: Context) {
             android.os.Process.setThreadPriority(10)   // 原版 setPriority(10)
             val bos = BufferedOutputStream(out, SEND_BUFFER_SIZE)
             while (writeActive) {
-                val frame = runCatching { writeQueue.take() }.getOrNull() ?: continue
+                val (ch, frame) = runCatching { writeQueue.take() }.getOrNull() ?: continue
                 runCatching {
-                    bos.write(frame)
-                    bos.flush()
+                    // 客户端模式：统一 bos；服务端模式：按 channel 选 socket
+                    val target = channelOut(ch) ?: bos
+                    if (target == null) {
+                        // 服务端模式该通道未接入（盒子没连这个端口）→ 丢弃该帧
+                        if (serverSockets.isNotEmpty()) return@runCatching
+                        error("no output stream")
+                    }
+                    target.write(frame)
+                    target.flush()
                 }.onFailure {
                     Log.e(TAG, "write fail, disconnect: ${it.message}")
                     close()   // 原版：写失败 → setIsConnected(false, WRITE_STREAM_ERROR)
@@ -208,9 +284,9 @@ class BoxConnection(private val appContext: Context) {
     }
 
     /** 组帧入队（所有发送统一走这里） */
-    private fun enqueue(frame: ByteArray) {
+    private fun enqueue(frame: ByteArray, channel: Int = CarlifeFrame.Channel.CMD) {
         if (!writeActive) return
-        if (!writeQueue.offer(frame)) {
+        if (!writeQueue.offer(channel to frame)) {
             Log.e(TAG, "write queue full, disconnect")
             close()
         }
@@ -357,7 +433,7 @@ class BoxConnection(private val appContext: Context) {
         val body = if (USE_INNER_FRAME) {
             CarlifeFrame.inner(serviceType, secured)
         } else secured
-        enqueue(CarlifeFrame.outer(channel, body))
+        enqueue(CarlifeFrame.outer(channel, body), channel)
     }
 
     /** 102401 改帧宽高（sendWH2Box 复刻） */
@@ -392,7 +468,7 @@ class BoxConnection(private val appContext: Context) {
         } else {
             CarlifeFrame.outer(channel, meta + raw)
         }
-        enqueue(frame)
+        enqueue(frame, channel)
     }
 
     /** 102402 视频心跳 */
@@ -432,6 +508,8 @@ class BoxConnection(private val appContext: Context) {
         writeQueue.clear()
         runCatching { writeThread?.interrupt() }
         runCatching { socket?.close() }
+        serverSockets.values.forEach { runCatching { it.close() } }
+        serverSockets.clear()
         hbJob?.cancel(); readJob?.cancel()
         encryptHandshake.onDisconnection()
         _state.value = State.Closed

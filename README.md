@@ -55,6 +55,36 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十六轮真机日志实证：TCP 角色反转（手机是服务端！）
+
+**数据来源**：设备上百度互联（com.baidu.carlife.vivo）的 xLog——用户真实连接记录
+（10-22，366KB → 解压 17.5MB，mars-xlog 分段 inflate 提取）。
+
+**真机实证的连接全流程**：
+```
+[CarlifeConnectHsgHandler] MSG_CMD_BOX_HELLO          ← 收到盒子 Hello
+[ConnectManager] setBoxAuthorized = 3                ← 授权成功
+[BoxConnectClient] isResetResolution = false
+[ConnectManager] setBoxSupportRate = false           ← isHuRate=false
+[VideoResolution] getResolution null (default)       ← 默认分辨率（无白名单命中）
+[VideoRecorder] MSG_CMD_VIDEO_ENCODER_START what=98313  ← ID 98313 实证正确 ✓
+[VideoRecorder] sendInitFrameRate, initRate =30      ← 真机默认 30fps（非 15！）
+```
+
+**TCP 角色反转（架构级修正）**：日志实证 `ConnectManager` 创建 **6 个 AcceptThread**
+（Cmd/Video/TTS/VR/Touch/Data）——**手机 app 是 TCP 服务端，盒子主动连手机**
+（我们原假设"手机主动连盒子"错了！）。
+
+**已落地**：
+- `BoxConnection.startServer()`：6 端口 Accept（7240/8240/9240/9241/9242/9340，
+  端口值沿用 2021 a/c.java 端口表），每通道独立 socket + 读循环，发送按 channel 路由
+- 默认帧率 15 → **30**（真机实证）
+- MainActivity 加「服务端模式」按钮（与原客户端模式并存，实测哪条通用哪条）
+- 空路由保护：盒子未接入的通道，帧丢弃不崩
+
+**仍未实证**：Accept 绑定的确切端口号（日志未打印，只有 5 位随机噪声）——端口表沿用
+2021 实证值，实测不对改 `SERVER_PORTS` 一张表的事。
+
 ## 第十五轮深挖：vivo 定制版独有资产（白盒密钥/人脸 DMS/Jovi/TurboNet）
 
 **vivo 版 assets 独有**（110MB 未压缩，比 std 版更大）：

@@ -199,7 +199,11 @@ fun MainScreen(
                 }) { Text("重新探测") }
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { discovery.startBleScan() }) { Text("BLE 扫描") }
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { connection?.startServer() }) { Text("服务端模式") }
             }
+            Text("服务端模式：手机监听 7240/8240/9240/9241/9242/9340 等盒子主动连（真机日志实证）",
+                fontSize = 11.sp)
             LazyColumn(Modifier.heightIn(max = 120.dp)) {
                 items(boxes) { b ->
                     Card(Modifier.fillMaxWidth().padding(vertical = 2.dp), onClick = {
