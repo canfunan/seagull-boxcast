@@ -64,8 +64,8 @@ class ScreenCastService : Service() {
                     .setSmallIcon(R.drawable.ic_launcher)
                     .setOngoing(true)
                     .build())
-                val mp = androidx.core.content.IntentCompat.getParcelableExtra(
-                    intent, EXTRA_PROJECTION, android.media.projection.MediaProjection::class.java)
+                // MediaProjection 非 Parcelable → 全局持有取（MainActivity 授权后放入）
+                val mp = BoxConnectionHolder.projection
                 if (mp == null) {
                     stopSelf(); return START_NOT_STICKY
                 }

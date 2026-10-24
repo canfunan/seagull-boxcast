@@ -58,9 +58,10 @@ class MainActivity : ComponentActivity() {
             val mp: android.media.projection.MediaProjection? =
                 getSystemService(MediaProjectionManager::class.java)
                     .getMediaProjection(result.resultCode, result.data!!)
+            // MediaProjection 非 Parcelable → 同进程全局持有（BoxConnectionHolder）
+            BoxConnectionHolder.projection = mp
             val intent = Intent(this, ScreenCastService::class.java).apply {
                 action = ScreenCastService.ACTION_START
-                putExtra(ScreenCastService.EXTRA_PROJECTION, mp)
                 putExtra(ScreenCastService.EXTRA_WIDTH, encWidth)
                 putExtra(ScreenCastService.EXTRA_HEIGHT, encHeight)
                 putExtra(ScreenCastService.EXTRA_BITRATE, encBitrate)
