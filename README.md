@@ -55,6 +55,28 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十四轮复盘：消息 ID 全量对齐（抓 6 个错！）+ 业务消息分级
+
+**ID 全量对照（44 个 vs std CommonParams 549 个权威值）**：
+- ❌→✅ 修正 6 个（全部是从 2026 ServiceTypes 错挖，两个版本 ID 不同步）：
+  `VIDEO_ENCODER_INIT 98312→98311`、`VIDEO_ENCODER_INIT_DONE 98317→65544`、
+  `FRAME_RATE_CHANGE_DONE 98318→65549`、`HU_PROTOCOL_VERSION 98308→98305`、
+  `VIDEO_ADAPT_DONE 98319→1040`、`PERMISSION_RECORD 65583→65580`
+- **视频握手组全中**——INIT/INIT_DONE 号错=握手根本握不上，这是“怎么连都黑屏”的潜在首因
+- 修正后 **44/44 全部与 std 权威一致**
+
+**业务消息分级**（剩余 505 个 ID 的处理策略）：
+
+| 级别 | 消息族 | 状态 |
+|---|---|---|
+| 投屏核心 | 视频（131073+98311 握手族）/音频（196xxx）/触摸（425985）/盒子（1024xx） | ✅ 全实现且 ID 验证 |
+| 体验增强 | **MediaInfo(65589) 车机 HUD 歌曲** / ModuleStatus(65574) / NaviNextTurn / TimeSync | ✅ 本轮落地 MediaInfo（MediaSession 读取+轮询，需通知监听授权）；ModuleStatus/TimeSync proto 就绪 |
+| 完整功能（可选） | BT HFP 电话/Contacts/CallRecords、VehicleData（车速/挡位/油量）、Voice（VR/MIC）、FeatureConfig 协商 | 消息 ID 已对照，proto 未全实现——投屏场景非必需，按需扩 |
+
+**本轮新增**：`net/MediaInfo.kt`（9 字段权威 proto + ModuleStatus + TimeSync）、
+`net/MediaSessionReader.java`（NotificationListener 读活跃 MediaSession，海鸥桌面同款方案）、
+ScreenCastService 5s 轮询推送歌曲变更；manifest 加通知监听服务。
+
 ## 第十三轮深挖：加密握手全套 + 统计上报（又抓 1 个 ID 错误）
 
 **加密握手**（EncryptSetupManager + RSAManager + EncryptConfig 实证）：

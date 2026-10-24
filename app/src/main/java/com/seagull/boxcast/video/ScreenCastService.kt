@@ -85,6 +85,8 @@ class ScreenCastService : Service() {
                 // 音频通道（channel 3）：INIT + 内部音频采集推送（44100/2/16 实证默认）
                 audioSender = com.seagull.boxcast.audio.AudioChannel.Sender(conn).apply { init() }
                 startAudioCapture(mp)
+                // 车机 HUD 歌曲信息：轮询系统 MediaSession（需通知监听授权，未授权自动跳过）
+                startMediaInfoLoop(conn)
                 // 双视频路径：盒子点播（102409 裸帧，H264Sender）+
                 // 标准 CarLife 推流（131073 + 12B 头 on channel 2，VideoSender）。
                 // 标准路径走 VideoHandshake 状态机：等 HU 的 INIT(98312) 配编码器、
@@ -194,6 +196,31 @@ class ScreenCastService : Service() {
         }, "AudioCapture").apply { start() }
     }
 
+    // ---------- 车机 HUD 歌曲信息（MediaSession → MSG_CMD_MEDIA_INFO） ----------
+
+    private var mediaInfoJob: java.util.Timer? = null
+
+    private fun startMediaInfoLoop(conn: BoxConnection) {
+        mediaInfoJob?.cancel()
+        mediaInfoJob = java.util.Timer("MediaInfo").apply {
+            scheduleAtFixedRate(object : java.util.TimerTask() {
+                private com.seagull.boxcast.net.MediaInfo.Info last = null
+                override fun run() {
+                    val cur = runCatching {
+                        com.seagull.boxcast.net.MediaNotificationListener.currentTrack()
+                    }.getOrNull() ?: return
+                    if (!cur.equals(last)) {
+                        last = cur
+                        runCatching {
+                            conn.sendRaw(com.seagull.boxcast.frame.CarlifeFrame.CmdId.MSG_CMD_MEDIA_INFO,
+                                com.seagull.boxcast.net.MediaInfo.encode(cur))
+                        }
+                    }
+                }
+            }, 2000, 5000)
+        }
+    }
+
     /** 熄屏/退后台省电：暂停编码输出与音频采集（推流门控关闭，编码器保留热启） */
     private fun powerSavingPause() {
         powerSaving = true
@@ -216,6 +243,7 @@ class ScreenCastService : Service() {
         handshakeStarted = false
         audioThread?.interrupt()
         audioSender?.stop()
+        mediaInfoJob?.cancel()
         runCatching { audioRecord?.stop(); audioRecord?.release() }
         super.onDestroy()
     }

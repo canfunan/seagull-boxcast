@@ -50,18 +50,18 @@ object CarlifeFrame {
         const val MSG_VIDEO_HEARTBEAT = 131074
 
         // 视频编码器握手（VideoMsgHandler 实证：INIT→INIT_DONE→START→推流）
-        const val MSG_CMD_VIDEO_ENCODER_INIT = 98312
+        const val MSG_CMD_VIDEO_ENCODER_INIT = 98311
         const val MSG_CMD_VIDEO_ENCODER_START = 98313
         const val MSG_CMD_VIDEO_ENCODER_PAUSE = 98314
         const val MSG_CMD_VIDEO_ENCODER_RESET = 98315
         const val MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE = 98316
-        const val MSG_CMD_VIDEO_ENCODER_INIT_DONE = 98317
-        const val MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE_DONE = 98318
-        const val MSG_CMD_VIDEO_ADAPT_DONE = 98319
+        const val MSG_CMD_VIDEO_ENCODER_INIT_DONE = 65544
+        const val MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE_DONE = 65549
+        const val MSG_CMD_VIDEO_ADAPT_DONE = 1040
 
         // 握手/版本/统计（CarlifeConnectHsgHandler addMsg 全集实证）
         const val MSG_CMD_HU_INFO = 98307
-        const val MSG_CMD_HU_PROTOCOL_VERSION = 98308
+        const val MSG_CMD_HU_PROTOCOL_VERSION = 98305
         const val MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS = 65538
         const val MSG_CMD_MD_INFO = 65540
         const val MSG_CMD_STATISTIC_INFO = 98343
@@ -77,10 +77,15 @@ object CarlifeFrame {
         const val MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE = 98411
         const val MSG_CMD_HU_AES_REC_RESPONSE = 98413
 
+        // 车机 HUD 增强（std 权威 ID）
+        const val MSG_CMD_MEDIA_INFO = 65589      // 当前歌曲（MediaSession 读取）
+        const val MSG_CMD_MODULE_STATUS = 65574   // 模块状态
+        const val MSG_CMD_TIME_SYNC = 65566       // 时间同步（TODO-CALIBRATE: std 值待验）
+
         // HU 索权（CarlifeConnectHsgHandler 实证）
         const val MSG_PERMISSION_READ_WRITE = 65579
         const val MSG_PERMISSION_LOCATION = 65581
-        const val MSG_PERMISSION_RECORD = 65583
+        const val MSG_PERMISSION_RECORD = 65580
         const val MSG_PERMISSION_LOCATION_HOME = 65594
 
         // 音频段（CommonParams 实证；channel 3=媒体 4=TTS 5=VR）

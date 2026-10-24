@@ -70,6 +70,16 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection"/>
 
+        <!-- 通知监听：读系统 MediaSession 供车机 HUD 显示歌曲（需用户在设置里开启） -->
+        <service
+            android:name=".net.MediaNotificationListener"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
+
         <!-- 反控兜底通道：车机触摸手势注入（无 root/无系统签名时用） -->
         <service
             android:name=".inject.CastAccessibilityService"
