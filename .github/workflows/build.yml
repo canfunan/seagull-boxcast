@@ -17,8 +17,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub ubuntu runner 预装 Android SDK（ANDROID_HOME 已置），
+      # 不再用 android-actions/setup-android（Node 24 兼容 bug 会崩）
 
       - name: Generate Gradle Wrapper
         uses: gradle/actions/setup-gradle@v4
