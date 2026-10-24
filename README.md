@@ -55,6 +55,27 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十二轮补齐：proto 字段序修正（.proto 权威）+ 5 缺口全补
+
+**assets 里 93 个 .proto 源文件 = 权威事实源**（此前字段号靠反编译硬推，2 个推错）：
+
+| Proto | .proto 权威字段序 | 旧实现 | 修正 |
+|---|---|---|---|
+| CarlifeBoxH264Send | **1=width 2=height 3=type 4=length 5=verifyValue 6=needPFrames 7=frameType** | 1=type 2=frameType 3=width 7=height | ✅ 已修 |
+| CarlifeBoxH264List | **1=cnt 2=timeStamp 4=rs_id 5=rs_code 6=rs_type 7=version_code** | 1=rsCode 5=rsId 6=cnt | ✅ 已修 |
+| BoxHello/MusicInit/VideoEncoderInfo/CheckUpdate/VehicleState/H264Init/TouchAction/HardKey | 与旧实现一致 | — | ✅ 验证通过 |
+
+**5 缺口全补**：
+1. **HU_INFO(98307) 解析**——`DeviceInfo.decode`（.proto 27 字段：os=1…model=14…carlifeversion=24）；
+   HU 设备信息是屏幕/音频重协商触发源（`CarlifeDeviceInfoManager.setCarDeviceInfo` 实证）
+2. **MD_INFO(65540) 主动上报**——Hello 认证后发送，`DeviceInfo.encodeMdInfo` = Build 全字段 + btaddress + CarLife 版本
+3. **PERMISSION 索权**——MSG_PERMISSION_READ_WRITE=65579 / LOCATION=65581 / RECORD=65583 / LOCATION_HOME=65594，
+   收到走 `onPermissionRequest` 回调（日志+TODO UI 引导）
+4. **亮灭屏前后台省电**——SCREEN_ON/OFF/USERPRESENT(65560-62) + VEHICLE_FG/BG(98455/56)
+   → `powerSavingPause/Resume`（熄屏停推+停采集，亮屏回前台发空包恢复）
+5. **断连自动重连**——退避 1s→2s→4s…30s 封顶，全端口候选轮询；连上重置；`destroy()` 停止；
+   MainActivity.onDestroy 已接 destroy（否则 Activity 退出后还在重连）
+
 ## 第十一轮深挖：视频编码器握手（对照原版消息全集 60 项）
 
 **CarlifeConnectHsgHandler addMsg 全集对照**——原版手机端实际处理 60 类消息，我们只覆盖盒子 1024xx + 触摸段。核心缺口：**标准视频握手**。

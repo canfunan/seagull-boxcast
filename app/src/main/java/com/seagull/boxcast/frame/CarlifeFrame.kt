@@ -67,6 +67,15 @@ object CarlifeFrame {
         const val MSG_CMD_STATISTIC_INFO = 65539
         const val MSG_CMD_VEHICLE_FOREGROUND = 98455
         const val MSG_CMD_VEHICLE_BACKGROUND = 98456
+        const val MSG_CMD_SCREEN_ON = 65560
+        const val MSG_CMD_SCREEN_OFF = 65561
+        const val MSG_CMD_SCREEN_USERPRESENT = 65562
+
+        // HU 索权（CarlifeConnectHsgHandler 实证）
+        const val MSG_PERMISSION_READ_WRITE = 65579
+        const val MSG_PERMISSION_LOCATION = 65581
+        const val MSG_PERMISSION_RECORD = 65583
+        const val MSG_PERMISSION_LOCATION_HOME = 65594
 
         // 音频段（CommonParams 实证；channel 3=媒体 4=TTS 5=VR）
         // 媒体音频 196xxx

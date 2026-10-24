@@ -140,6 +140,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         discovery.clear()
+        connection?.destroy()   // 停止自动重连 + 释放协程（否则 Activity 退了还在重连）
     }
 }
 

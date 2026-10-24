@@ -79,19 +79,19 @@ data class BoxVehicleState(val connectState: Int = 0) {   // 1
  * （rsCode/rsId 呼应 BoxConstants.BOX_RS_CODE=3 / BOX_RS_ID=2）
  */
 data class BoxH264List(
-    val rsCode: Int = 3,          // 1  对应 BoxConstants.BOX_RS_CODE
+    val cnt: Int = 0,             // 1  .proto 权威
     val timeStamp: Long = 0,      // 2
-    val rsType: Int = 0,          // 4
-    val rsId: Int = 2,            // 5  对应 BoxConstants.BOX_RS_ID
-    val cnt: Int = 0,             // 6
-    val versionCode: Int = 0,     // 7
+    val rsId: Int = 2,            // 4  rs_id
+    val rsCode: Int = 3,          // 5  rs_code（BoxConstants.BOX_RS_CODE=3）
+    val rsType: Int = 0,          // 6  rs_type
+    val versionCode: Int = 0,     // 7  version_code
 ) {
     fun encode(): ByteArray = Wire.Writer().apply {
-        int32(1, rsCode)
+        int32(1, cnt)
         int64(2, timeStamp)
-        int32(4, rsType)
-        int32(5, rsId)
-        int32(6, cnt)
+        int32(4, rsId)
+        int32(5, rsCode)
+        int32(6, rsType)
         int32(7, versionCode)
     }.toByteArray()
 
@@ -101,11 +101,11 @@ data class BoxH264List(
             while (!atEnd()) {
                 val (f, w) = readTag()
                 when (f) {
-                    1 -> m = m.copy(rsCode = readInt32())
+                    1 -> m = m.copy(cnt = readInt32())
                     2 -> m = m.copy(timeStamp = readInt64())
-                    4 -> m = m.copy(rsType = readInt32())
-                    5 -> m = m.copy(rsId = readInt32())
-                    6 -> m = m.copy(cnt = readInt32())
+                    4 -> m = m.copy(rsId = readInt32())
+                    5 -> m = m.copy(rsCode = readInt32())
+                    6 -> m = m.copy(rsType = readInt32())
                     7 -> m = m.copy(versionCode = readInt32())
                     else -> skip(w)
                 }
@@ -155,22 +155,22 @@ data class BoxH264Init(
  * setLength(4,int64)/setFrameType(2) 调用序。
  */
 data class BoxH264Send(
-    val type: Int = 0,              // 1
-    val frameType: Int = 0,         // 2  帧类型（I/P）
-    val width: Int = 0,             // 3
-    val length: Long = 0,           // 4  int64！数据长度
+    val width: Int = 0,             // 1  .proto 权威（CarlifeBoxH264SendProto.proto）
+    val height: Int = 0,            // 2
+    val type: Int = 0,              // 3
+    val length: Long = 0,           // 4  int64
     val verifyValue: String = "",   // 5
     val needPFrames: Boolean = false, // 6
-    val height: Int = 0,            // 7
+    val frameType: Int = 0,         // 7
 ) {
     fun encode(): ByteArray = Wire.Writer().apply {
-        int32(1, type)
-        int32(2, frameType)
-        int32(3, width)
+        int32(1, width)
+        int32(2, height)
+        int32(3, type)
         int64(4, length)
         string(5, verifyValue)
         bool(6, needPFrames)
-        int32(7, height)
+        int32(7, frameType)
     }.toByteArray()
 
     companion object {
@@ -179,13 +179,13 @@ data class BoxH264Send(
             while (!atEnd()) {
                 val (f, w) = readTag()
                 when (f) {
-                    1 -> m = m.copy(type = readInt32())
-                    2 -> m = m.copy(frameType = readInt32())
-                    3 -> m = m.copy(width = readInt32())
+                    1 -> m = m.copy(width = readInt32())
+                    2 -> m = m.copy(height = readInt32())
+                    3 -> m = m.copy(type = readInt32())
                     4 -> m = m.copy(length = readInt64())
                     5 -> m = m.copy(verifyValue = readString())
                     6 -> m = m.copy(needPFrames = readBool())
-                    7 -> m = m.copy(height = readInt32())
+                    7 -> m = m.copy(frameType = readInt32())
                     else -> skip(w)
                 }
             }

@@ -115,6 +115,15 @@ class BoxConnection(private val appContext: Context) {
     var onVideoFrameRateChange: ((fps: Int) -> Unit)? = null
     var onVersionMatch: (() -> Unit)? = null
 
+    // 设备信息/亮灭屏/前后台/索权（CarlifeConnectHsgHandler 60 消息全集补齐）
+    var onHuInfo: ((Map<String, String>) -> Unit)? = null
+    var onScreenOn: (() -> Unit)? = null
+    var onScreenOff: (() -> Unit)? = null
+    var onVehicleForeground: (() -> Unit)? = null
+    var onVehicleBackground: (() -> Unit)? = null
+    /** HU 索权：type = location/read_write/record（MSG_PERMISSION_* 65579-65594） */
+    var onPermissionRequest: ((type: String) -> Unit)? = null
+
     val authorizedCode: Int
         get() = (state.value as? State.Authorized)?.code ?: BoxTypes.IS_NOT_BOX
 
@@ -124,7 +133,15 @@ class BoxConnection(private val appContext: Context) {
      * 连盒子并按候选端口逐个尝试。
      * @param host 盒子 IP（发现模块给出，如 192.168.0.1）
      */
+    /** 断开后自动重连（退避 1s→2s→4s…30s 封顶）；destroy() 停止 */
+    @Volatile var autoReconnect = true
+    private var lastHost: String? = null
+    private var reconnectJob: Job? = null
+    private var reconnectDelay = 1000L
+
     fun connect(host: String) {
+        lastHost = host
+        reconnectJob?.cancel()
         if (state.value is State.Connecting || state.value is State.Authorized) return
         scope.launch {
             try {
@@ -258,6 +275,16 @@ class BoxConnection(private val appContext: Context) {
                     onVideoFrameRateChange?.invoke(info.frameType)
                 }
                 CmdId.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS -> onVersionMatch?.invoke()
+                // 设备信息/亮灭屏/前后台/索权
+                CmdId.MSG_CMD_HU_INFO -> onHuInfo?.invoke(DeviceInfo.decode(body.data))
+                CmdId.MSG_CMD_SCREEN_ON -> onScreenOn?.invoke()
+                CmdId.MSG_CMD_SCREEN_OFF -> onScreenOff?.invoke()
+                CmdId.MSG_CMD_SCREEN_USERPRESENT -> onScreenOn?.invoke()
+                CmdId.MSG_CMD_VEHICLE_FOREGROUND -> onVehicleForeground?.invoke()
+                CmdId.MSG_CMD_VEHICLE_BACKGROUND -> onVehicleBackground?.invoke()
+                CmdId.MSG_PERMISSION_LOCATION -> onPermissionRequest?.invoke("location")
+                CmdId.MSG_PERMISSION_READ_WRITE -> onPermissionRequest?.invoke("read_write")
+                CmdId.MSG_PERMISSION_RECORD -> onPermissionRequest?.invoke("record")
             }
         }.onFailure { Log.w(TAG, "handle frame ${body.serviceType} fail: ${it.message}") }
     }
@@ -288,6 +315,13 @@ class BoxConnection(private val appContext: Context) {
         // checkBoxReset：分辨率协商（复刻 VideoResolution.reset + sendWH2Box）
         if (hello.isResetResolution || !hello.isHuRate) {
             Log.i(TAG, "box reset resolution (isResetResolution=${hello.isResetResolution}, isHuRate=${hello.isHuRate})")
+        }
+
+        // Hello 后：上报手机身份 MD_INFO(65540)（CarlifeConnectHsgHandler:836 实证）+
+        // 起心跳。MD_INFO 内容是 Build 全字段，盒子/HU 可据此适配
+        runCatching {
+            sendRaw(com.seagull.boxcast.frame.CmdId.MSG_CMD_MD_INFO,
+                DeviceInfo.encodeMdInfo(), CarlifeFrame.Channel.CMD)
         }
 
         // Hello 后起心跳
@@ -381,9 +415,32 @@ class BoxConnection(private val appContext: Context) {
         runCatching { socket?.close() }
         hbJob?.cancel(); readJob?.cancel()
         _state.value = State.Closed
+        scheduleReconnect()
+    }
+
+    /** 退避重连（读循环异常退出/写失败都会走到 close → 这里接住） */
+    private fun scheduleReconnect() {
+        if (!autoReconnect) return
+        val host = lastHost ?: return
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            Log.i(TAG, "reconnect in ${reconnectDelay}ms to $host")
+            kotlinx.coroutines.delay(reconnectDelay)
+            reconnectDelay = (reconnectDelay * 2).coerceAtMost(30_000L)
+            for (port in DATA_PORT_CANDIDATES) {
+                _state.value = State.Connecting(host, port)
+                if (tryConnect(host, port)) {
+                    reconnectDelay = 1000L   // 连上重置退避
+                    return@launch
+                }
+            }
+            scheduleReconnect()   // 全端口失败，继续退避
+        }
     }
 
     fun destroy() {
+        autoReconnect = false
+        reconnectJob?.cancel()
         close()
         scope.cancel()
     }

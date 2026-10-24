@@ -108,10 +108,23 @@ class ScreenCastService : Service() {
                 conn.onVideoEncoderReset = { handshake?.onEncoderReset() }
                 conn.onVideoFrameRateChange = { f -> handshake?.onFrameRateChange(f) }
                 conn.onVersionMatch = { handshake?.onVersionMatch() }
+                // 亮灭屏/前后台省电：车机熄屏或退后台 → 暂停推流+停采集；亮屏回前台 → 恢复
+                conn.onScreenOff = { powerSavingPause() }
+                conn.onVehicleBackground = { powerSavingPause() }
+                conn.onScreenOn = { powerSavingResume() }
+                conn.onVehicleForeground = { powerSavingResume() }
+                conn.onHuInfo = { info ->
+                    Log.i("ScreenCast", "HU info: $info")   // 屏幕/音频重协商触发源（DeviceInfo 27 字段）
+                }
+                conn.onPermissionRequest = { type ->
+                    Log.w("ScreenCast", "HU requests permission: $type")   // TODO: UI 引导授权
+                }
 
                 encoder = H264Encoder(mp, dm) { data, key, pts ->
                     // 标准路径：必须等 HU START（98313）；点播路径：等 102407（sender.started）
-                    val allow = if (useStandard) handshakeStarted else sender?.started == true
+                    // 省电模式（熄屏/车机退后台）下不推
+                    val allow = !powerSaving &&
+                        (if (useStandard) handshakeStarted else sender?.started == true)
                     if (allow) {
                         if (useStandard) videoSender?.sendFrame(data) else sender?.sendFrame(data, key, pts)
                     }
@@ -180,6 +193,21 @@ class ScreenCastService : Service() {
             }.onFailure { Log.e("ScreenCast", "audio capture fail", it) }
         }, "AudioCapture").apply { start() }
     }
+
+    /** 熄屏/退后台省电：暂停编码输出与音频采集（推流门控关闭，编码器保留热启） */
+    private fun powerSavingPause() {
+        powerSaving = true
+        Log.i("ScreenCast", "power saving: pause streaming")
+    }
+
+    /** 亮屏/回前台恢复 */
+    private fun powerSavingResume() {
+        powerSaving = false
+        videoSender?.sendEmptyForeground()   // 恢复时告知 HU（sendEmptyPacketForeground 实证）
+        Log.i("ScreenCast", "power saving: resume streaming")
+    }
+
+    private var powerSaving = false
 
     override fun onDestroy() {
         sender?.finish()
