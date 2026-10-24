@@ -63,11 +63,13 @@ class ScreenCastService : Service() {
                     .setSmallIcon(R.drawable.ic_launcher)
                     .setOngoing(true)
                     .build())
-                val mp = intent.getParcelableExtra<MediaProjection>(EXTRA_PROJECTION)
+                val mp = androidx.core.content.IntentCompat.getParcelableExtra(
+                    intent, EXTRA_PROJECTION, android.media.projection.MediaProjection::class.java)
                 if (mp == null) {
                     stopSelf(); return START_NOT_STICKY
                 }
-                val dm = getSystemService(DisplayManager::class.java)
+                val dm: android.hardware.display.DisplayManager =
+                    getSystemService(android.hardware.display.DisplayManager::class.java)
                 val conn = BoxConnectionHolder.connection ?: run { stopSelf(); return START_NOT_STICKY }
 
                 // 编码参数（UI 可调；默认对齐逆向实证值 832x480@15fps/3.2Mbps）

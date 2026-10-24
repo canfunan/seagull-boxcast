@@ -7,7 +7,7 @@ import com.seagull.boxcast.net.BoxConnection
  * 标准视频推流（复刻官方 Recorder.sendVideoData + ConnectManager.writeVideoData 实证）。
  *
  * 与盒子点播路径（H264Sender，102409 裸帧）是**两条独立路径**：
- *   本类 = 标准 CarLife 视频流：channel 2 + [12B 头][H.264] 两段写
+ *   本类 = 标准 CarLife 视频流：channel 2 + 12B 头 + H.264 两段写
  *   MSG_VIDEO_DATA(131073) 走 VideoSocket(8240)/AOA channel 2
  *
  * 12B 头（Recorder.packageHead 实证，大端）：
@@ -33,7 +33,7 @@ class VideoSender(private val conn: BoxConnection) {
     private var pausedByHeadUnit = false
     private var pausedByMobile = false
 
-    /** 发一帧：[12B 头][H.264]（channel 2） */
+    /** 发一帧：12B 头 + H.264（channel 2） */
     fun sendFrame(h264: ByteArray) {
         if (pausedByHeadUnit || pausedByMobile) return
         val head = buildHead(h264.size, TYPE_FOREGROUND)
