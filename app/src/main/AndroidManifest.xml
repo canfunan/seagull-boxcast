@@ -203,7 +203,8 @@
             android:exported="false" />
 <service
             android:name="com.seagull.carlauncher.KeepAliveService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 <service
             android:name="com.seagull.carlauncher.PipProjectionService"
             android:exported="false"
