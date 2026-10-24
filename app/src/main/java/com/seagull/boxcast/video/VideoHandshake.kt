@@ -83,7 +83,17 @@ class VideoHandshake(private val conn: BoxConnection) {
 
     /** 版本匹配后：回统计 + 视频心跳（handleProtocolVersionMatch 实证） */
     fun onVersionMatch() {
-        conn.sendRaw(CarlifeFrame.CmdId.MSG_CMD_STATISTIC_INFO, ByteArray(0))
+        conn.sendRaw(CarlifeFrame.CmdId.MSG_CMD_STATISTIC_INFO,
+            com.seagull.boxcast.net.StatisticsInfo.encode(
+                com.seagull.boxcast.net.StatisticsInfo.Info(
+                    cuid = java.util.UUID.randomUUID().toString(),
+                    versionName = "BoxCast",
+                    versionCode = 1,
+                    channel = "boxcast",
+                    connectCount = 1,
+                    connectSuccessCount = 1,
+                )
+            ))
         conn.sendRaw(CarlifeFrame.CmdId.MSG_VIDEO_HEARTBEAT, ByteArray(0))
     }
 }

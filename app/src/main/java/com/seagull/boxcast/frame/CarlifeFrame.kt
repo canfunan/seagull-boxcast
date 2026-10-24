@@ -64,12 +64,18 @@ object CarlifeFrame {
         const val MSG_CMD_HU_PROTOCOL_VERSION = 98308
         const val MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS = 65538
         const val MSG_CMD_MD_INFO = 65540
-        const val MSG_CMD_STATISTIC_INFO = 65539
+        const val MSG_CMD_STATISTIC_INFO = 98343
         const val MSG_CMD_VEHICLE_FOREGROUND = 98455
         const val MSG_CMD_VEHICLE_BACKGROUND = 98456
         const val MSG_CMD_SCREEN_ON = 65560
         const val MSG_CMD_SCREEN_OFF = 65561
         const val MSG_CMD_SCREEN_USERPRESENT = 65562
+
+        // 加密握手（EncryptSetupManager 实证：RSA 换 AES seed，之后全消息 AES）
+        const val MSG_CMD_MD_RSA_PUBLIC_KEY_REQUEST = 65642
+        const val MSG_CMD_MD_AES_KEY_SEND_REQUEST = 65644
+        const val MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE = 98411
+        const val MSG_CMD_HU_AES_REC_RESPONSE = 98413
 
         // HU 索权（CarlifeConnectHsgHandler 实证）
         const val MSG_PERMISSION_READ_WRITE = 65579

@@ -55,6 +55,28 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十三轮深挖：加密握手全套 + 统计上报（又抓 1 个 ID 错误）
+
+**加密握手**（EncryptSetupManager + RSAManager + EncryptConfig 实证）：
+- 前提：AMIS `CONTENT_ENCRYPTION` 开；**盒子（1024xx+Hello tag）不走，标准 HU 协商**
+- 流程：`MD_RSA_PUBLIC_KEY_REQUEST(65642)` → `HU_RSA_PUBLIC_KEY_RESPONSE(98411){Base64 X509 公钥}`
+  → `MD_AES_KEY_SEND_REQUEST(65644){Base64(RSA/ECB/PKCS1(seed))}` → `HU_AES_REC_RESPONSE(98413)` → 启用
+- **seed = UUID.random().substring(0,16)**（EncryptConfig.getAesSeed 实证）
+- 启用后**所有 CmdMessage 的 data 过 AES/ECB**，length 改密文长度（ConnectSocket 实证）
+- 落地：`crypto/EncryptHandshake.kt` + `BoxCrypto.encryptWithKey/decryptWithKey`；
+  BoxConnection 收发全线加密切装（头明文 data 密文）、断连自动重置
+- 附带发现：`RSAManager.encrypt(String)` 静态版用 **ARC4+白盒 key**（本地配置加密第二套）
+
+**STATISTIC_INFO ID 修正**：`98343`（此前从 2026 ServiceTypes 错挖成 65539——两个版本 ID 不同步）
+
+**StatisticsInfo**（.proto 权威 10 字段）：cuid/versionName/versionCode/channel/connectCount/
+connectSuccessCount/connectTime/crashLog/**carNumber/carType**
+- 版本匹配后手机上报完整统计（原是实现发空包）
+- HU 也会发（CarlifeConnectHsgHandler:473 "渠道号认证"）——**carNumber/carType 是车型渠道
+  （VehicleChannels 2\d{7}）匹配的数据源**，落地 `net/StatisticsInfo.kt` + `onHuStatistics` 回调
+
+**TimeSync**（.proto）：`{timeStamp}` 单字段，连接后对时（低优先，已记录）
+
 ## 第十二轮补齐：proto 字段序修正（.proto 权威）+ 5 缺口全补
 
 **assets 里 93 个 .proto 源文件 = 权威事实源**（此前字段号靠反编译硬推，2 个推错）：

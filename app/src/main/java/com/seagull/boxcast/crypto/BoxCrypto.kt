@@ -53,4 +53,17 @@ object BoxCrypto {
 
     fun decrypt(data: ByteArray, len: Int = data.size): ByteArray? =
         runCatching { decryptCipher.get()!!.doFinal(data, 0, len) }.getOrNull()
+
+    /** 自定义密钥 AES/ECB（加密握手 seed 用；ThreadLocal 同款隔离） */
+    fun encryptWithKey(key: ByteArray, data: ByteArray): ByteArray? = runCatching {
+        val c = Cipher.getInstance(TRANSFORMATION)
+        c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"))
+        c.doFinal(data)
+    }.getOrNull()
+
+    fun decryptWithKey(key: ByteArray, data: ByteArray): ByteArray? = runCatching {
+        val c = Cipher.getInstance(TRANSFORMATION)
+        c.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"))
+        c.doFinal(data)
+    }.getOrNull()
 }

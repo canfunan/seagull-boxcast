@@ -115,6 +115,9 @@ class BoxConnection(private val appContext: Context) {
     var onVideoFrameRateChange: ((fps: Int) -> Unit)? = null
     var onVersionMatch: (() -> Unit)? = null
 
+    /** 加密握手（标准 HU；盒子场景 configSwitch=false 不走） */
+    val encryptHandshake = com.seagull.boxcast.crypto.EncryptHandshake(this)
+
     // 设备信息/亮灭屏/前后台/索权（CarlifeConnectHsgHandler 60 消息全集补齐）
     var onHuInfo: ((Map<String, String>) -> Unit)? = null
     var onScreenOn: (() -> Unit)? = null
@@ -123,6 +126,7 @@ class BoxConnection(private val appContext: Context) {
     var onVehicleBackground: (() -> Unit)? = null
     /** HU 索权：type = location/read_write/record（MSG_PERMISSION_* 65579-65594） */
     var onPermissionRequest: ((type: String) -> Unit)? = null
+    var onHuStatistics: ((com.seagull.boxcast.net.StatisticsInfo.Info) -> Unit)? = null
 
     val authorizedCode: Int
         get() = (state.value as? State.Authorized)?.code ?: BoxTypes.IS_NOT_BOX
@@ -229,12 +233,15 @@ class BoxConnection(private val appContext: Context) {
     }
 
     private fun handleFrame(channel: Int, payload: ByteArray) {
-        val body = if (USE_INNER_FRAME) {
+        var body = if (USE_INNER_FRAME) {
             parseInner(payload) ?: return
         } else {
             // 裸 protobuf 模式：channel 即 serviceType（联调时按实际调整）
             com.seagull.boxcast.frame.CmdMessage(channel, payload)
         }
+        // 加密启用时解密（ConnectSocket 读侧对称处理）
+        body = com.seagull.boxcast.frame.CmdMessage(body.serviceType,
+            encryptHandshake.decryptIfEnabled(body.data))
         Log.i(TAG, "recv serviceType=${body.serviceType} len=${body.data.size}")
         // 单条消息解析失败不影响连接（畸形包/半包保护）
         runCatching {
@@ -275,6 +282,17 @@ class BoxConnection(private val appContext: Context) {
                     onVideoFrameRateChange?.invoke(info.frameType)
                 }
                 CmdId.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS -> onVersionMatch?.invoke()
+                // 加密握手（标准 HU）
+                CmdId.MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE ->
+                    encryptHandshake.onRsaResponse(body.data)
+                CmdId.MSG_CMD_HU_AES_REC_RESPONSE -> encryptHandshake.onAesRecResponse()
+                // HU 统计上报（渠道号认证：carNumber/carType = 车型渠道数据源）
+                CmdId.MSG_CMD_STATISTIC_INFO -> {
+                    val st = com.seagull.boxcast.net.StatisticsInfo.decode(body.data)
+                    Log.i(TAG, "HU statistics: cuid=${st.cuid} channel=${st.channel} " +
+                        "carNumber=${st.carNumber} carType=${st.carType}")
+                    onHuStatistics?.invoke(st)
+                }
                 // 设备信息/亮灭屏/前后台/索权
                 CmdId.MSG_CMD_HU_INFO -> onHuInfo?.invoke(DeviceInfo.decode(body.data))
                 CmdId.MSG_CMD_SCREEN_ON -> onScreenOn?.invoke()
@@ -335,9 +353,10 @@ class BoxConnection(private val appContext: Context) {
     // ---------- 发送 ----------
 
     private fun send(serviceType: Int, payload: ByteArray, channel: Int = CarlifeFrame.Channel.CMD) {
+        val secured = encryptHandshake.encryptIfEnabled(payload)
         val body = if (USE_INNER_FRAME) {
-            CarlifeFrame.inner(serviceType, payload)
-        } else payload
+            CarlifeFrame.inner(serviceType, secured)
+        } else secured
         enqueue(CarlifeFrame.outer(channel, body))
     }
 
@@ -414,6 +433,7 @@ class BoxConnection(private val appContext: Context) {
         runCatching { writeThread?.interrupt() }
         runCatching { socket?.close() }
         hbJob?.cancel(); readJob?.cancel()
+        encryptHandshake.onDisconnection()
         _state.value = State.Closed
         scheduleReconnect()
     }
