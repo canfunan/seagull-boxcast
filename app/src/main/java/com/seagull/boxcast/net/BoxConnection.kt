@@ -23,10 +23,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.BufferedOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.LinkedBlockingQueue
 
 /**
  * 盒子连接（复刻 BoxConnectClient + ConnectManager 行为）。
@@ -58,6 +60,10 @@ class BoxConnection(private val appContext: Context) {
         const val USE_INNER_FRAME = true
 
         private const val HEARTBEAT_MS = 3000L
+
+        /** 收发缓冲（ConnectSocket 实证 320KB） */
+        private const val SEND_BUFFER_SIZE = 327680
+        private const val RECV_BUFFER_SIZE = 327680
     }
 
     sealed interface State {
@@ -75,6 +81,14 @@ class BoxConnection(private val appContext: Context) {
     private var reader: FrameReader? = null
     private var readJob: Job? = null
     private var hbJob: Job? = null
+    private var writeThread: Thread? = null
+    private var writeActive = false
+
+    /**
+     * 独立写队列（对照原版 ConnectSocket.WriteThread 实证：priority 10 + BlockingQueue）。
+     * 视频/音频大数据不再阻塞读循环（心跳/控制消息延迟是掉线主因）。
+     */
+    private val writeQueue = LinkedBlockingQueue<ByteArray>(256)
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state
@@ -126,15 +140,50 @@ class BoxConnection(private val appContext: Context) {
         val s = Socket()
         return@withContext try {
             s.tcpNoDelay = true
+            s.keepAlive = true                          // TCP 保活（原版 Ping 180s 的底层）
+            s.receiveBufferSize = RECV_BUFFER_SIZE      // 320KB（原版实证）
+            s.sendBufferSize = SEND_BUFFER_SIZE
             s.connect(InetSocketAddress(host, port), 4000)
             socket = s
             out = s.getOutputStream()
             reader = FrameReader()
+            startWriteThread()
             startReadLoop(s.getInputStream())
             true
         } catch (e: Exception) {
             runCatching { s.close() }
             false
+        }
+    }
+
+    // ---------- 写线程（原版 WriteThread 实证） ----------
+
+    private fun startWriteThread() {
+        writeActive = true
+        writeQueue.clear()
+        writeThread = Thread({
+            android.os.Process.setThreadPriority(10)   // 原版 setPriority(10)
+            val bos = BufferedOutputStream(out, SEND_BUFFER_SIZE)
+            while (writeActive) {
+                val frame = runCatching { writeQueue.take() }.getOrNull() ?: continue
+                runCatching {
+                    bos.write(frame)
+                    bos.flush()
+                }.onFailure {
+                    Log.e(TAG, "write fail, disconnect: ${it.message}")
+                    close()   // 原版：写失败 → setIsConnected(false, WRITE_STREAM_ERROR)
+                    return@Thread
+                }
+            }
+        }, "BoxWrite").apply { start() }
+    }
+
+    /** 组帧入队（所有发送统一走这里） */
+    private fun enqueue(frame: ByteArray) {
+        if (!writeActive) return
+        if (!writeQueue.offer(frame)) {
+            Log.e(TAG, "write queue full, disconnect")
+            close()
         }
     }
 
@@ -234,8 +283,7 @@ class BoxConnection(private val appContext: Context) {
         val body = if (USE_INNER_FRAME) {
             CarlifeFrame.inner(serviceType, payload)
         } else payload
-        val frame = CarlifeFrame.outer(channel, body)
-        synchronized(this) { out?.write(frame); out?.flush() }
+        enqueue(CarlifeFrame.outer(channel, body))
     }
 
     /** 102401 改帧宽高（sendWH2Box 复刻） */
@@ -270,7 +318,7 @@ class BoxConnection(private val appContext: Context) {
         } else {
             CarlifeFrame.outer(channel, meta + raw)
         }
-        synchronized(this) { out?.write(frame); out?.flush() }
+        enqueue(frame)
     }
 
     /** 102402 视频心跳 */
@@ -306,6 +354,9 @@ class BoxConnection(private val appContext: Context) {
     // ---------- 关闭 ----------
 
     fun close() {
+        writeActive = false
+        writeQueue.clear()
+        runCatching { writeThread?.interrupt() }
         runCatching { socket?.close() }
         hbJob?.cancel(); readJob?.cancel()
         _state.value = State.Closed

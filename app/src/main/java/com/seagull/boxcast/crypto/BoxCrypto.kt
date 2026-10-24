@@ -29,14 +29,18 @@ object BoxCrypto {
         Base64.decode(raw, Base64.NO_WRAP)
     }
 
-    private val encryptCipher: Cipher by lazy {
-        Cipher.getInstance(TRANSFORMATION).apply {
+    /**
+     * Cipher 非线程安全：原版 ConnectSocket 收/发各持一个 AESManager。
+     * 本工程多线程调用（编码线程/采集线程/心跳协程）→ ThreadLocal 每线程独立实例。
+     */
+    private val encryptCipher = object : ThreadLocal<Cipher>() {
+        override fun initialValue() = Cipher.getInstance(TRANSFORMATION).apply {
             init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"))
         }
     }
 
-    private val decryptCipher: Cipher by lazy {
-        Cipher.getInstance(TRANSFORMATION).apply {
+    private val decryptCipher = object : ThreadLocal<Cipher>() {
+        override fun initialValue() = Cipher.getInstance(TRANSFORMATION).apply {
             init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"))
         }
     }
@@ -45,8 +49,8 @@ object BoxCrypto {
     fun aesKey(): ByteArray = keyBytes.copyOf()
 
     fun encrypt(data: ByteArray, len: Int = data.size): ByteArray? =
-        runCatching { encryptCipher.doFinal(data, 0, len) }.getOrNull()
+        runCatching { encryptCipher.get()!!.doFinal(data, 0, len) }.getOrNull()
 
     fun decrypt(data: ByteArray, len: Int = data.size): ByteArray? =
-        runCatching { decryptCipher.doFinal(data, 0, len) }.getOrNull()
+        runCatching { decryptCipher.get()!!.doFinal(data, 0, len) }.getOrNull()
 }

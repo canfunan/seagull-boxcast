@@ -82,9 +82,9 @@ class ScreenCastService : Service() {
                 conn.onH264SendRequest = { req ->
                     sender?.sendH264Start(req.width, req.height, req.type, req.length.toInt(), req.frameType)
                 }
-                // 音频通道（channel 3）：INIT + AudioRecord 采集推送（44100/2/16 实证默认）
+                // 音频通道（channel 3）：INIT + 内部音频采集推送（44100/2/16 实证默认）
                 audioSender = com.seagull.boxcast.audio.AudioChannel.Sender(conn).apply { init() }
-                startAudioCapture()
+                startAudioCapture(mp)
                 // 双视频路径：盒子点播（102409 裸帧，H264Sender）+
                 // 标准 CarLife 推流（131073 + 12B 头 on channel 2，VideoSender）。
                 // 用哪个由 extras 开关决定（实测校准后固定）
@@ -117,7 +117,14 @@ class ScreenCastService : Service() {
     private var audioSender: com.seagull.boxcast.audio.AudioChannel.Sender? = null
     private var videoSender: VideoSender? = null
 
-    private fun startAudioCapture() {
+    /**
+     * 内部音频采集（AudioPlaybackCapture，Android 10+ 公开 API）：
+     * 直接用 MediaProjection 构建 capture config——**投屏授权即获内部音频权，无需 root/特权**。
+     * 参数对齐官方 PCMMediaManager 实证默认：44100 / 双声道 / 16bit。
+     * （官方媒体音频源是 app 播放的音乐流；投屏镜像场景用本 API 采全机内部声音）
+     */
+    private fun startAudioCapture(mp: android.media.projection.MediaProjection) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
         val sr = com.seagull.boxcast.audio.AudioChannel.DEFAULT_SAMPLE_RATE
         val minBuf = android.media.AudioRecord.getMinBufferSize(
             sr,
@@ -127,13 +134,18 @@ class ScreenCastService : Service() {
         audioThread = Thread({
             android.os.Process.setThreadPriority(-8)
             runCatching {
-                val rec = android.media.AudioRecord(
-                    android.media.MediaRecorder.AudioSource.MIC,   // TODO-CALIBRATE: 音源按场景换（投屏内录用 REMOTE_SUBMIX 需特权）
-                    sr,
-                    android.media.AudioFormat.CHANNEL_IN_STEREO,
-                    android.media.AudioFormat.ENCODING_PCM_16BIT,
-                    minBuf * 2,
-                )
+                val captureConfig = android.media.AudioPlaybackCaptureConfiguration.Builder(mp).build()
+                val rec = android.media.AudioRecord.Builder()
+                    .setAudioPlaybackCaptureConfiguration(captureConfig)
+                    .setAudioFormat(
+                        android.media.AudioFormat.Builder()
+                            .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sr)
+                            .setChannelMask(android.media.AudioFormat.CHANNEL_IN_STEREO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(minBuf * 2)
+                    .build()
                 audioRecord = rec
                 rec.startRecording()
                 val buf = ByteArray(minBuf)
@@ -143,7 +155,7 @@ class ScreenCastService : Service() {
                 }
                 rec.stop()
                 rec.release()
-            }
+            }.onFailure { Log.e("ScreenCast", "audio capture fail", it) }
         }, "AudioCapture").apply { start() }
     }
 

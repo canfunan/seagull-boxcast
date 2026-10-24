@@ -58,6 +58,10 @@ class H264Encoder(
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)   // 秒级；精确 IDR 间隔用 requestKeyFrame
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+            // 官方 Recorder 实证：Baseline profile + level 256（部分盒子/车机只解 Baseline，
+            // 不设可能落到 High 导致花屏）
+            setInteger(MediaFormat.KEY_PROFILE, 1)            // AVCProfileBaseline
+            setInteger(MediaFormat.KEY_LEVEL, 256)
         }
 
         codec = MediaCodec.createEncoderByType(MIME).apply {

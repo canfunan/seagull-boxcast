@@ -55,6 +55,29 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十轮全量通读对照：传输层/线程安全/编码参数/音频源 4 类修正
+
+**ConnectSocket 对照（787 行通读）**：
+- 原版：ReadThread + **WriteThread(priority 10 + BlockingQueue)** + TouchThread 三线程分离；
+  320KB 收发缓冲；写失败 → `setIsConnected(false, WRITE_STREAM_ERROR)` 断链
+- 我们原实现：读协程内同步 write → **H.264 大数据阻塞读循环**（心跳延迟=掉线主因）
+- ✅ 已修：独立写线程 + 256 深度队列 + 写异常断链 + 320KB BufferedOutputStream + TCP keepalive
+
+**Cipher 线程安全**：原版收/发各一个 AESManager；我们单例 Cipher 被编码/采集/心跳三线程并发调 → **必修**
+- ✅ 已修：ThreadLocal 每线程独立 Cipher 实例
+
+**Recorder 编码参数对照**：
+- 原版：`profile=1(Baseline)` + `level=256` + 4Mbps + 15fps + i-frame-interval=0（按需 IDR）
+- 我们缺 profile/level → **部分盒子只解 Baseline，不设=花屏**
+- ✅ 已修：KEY_PROFILE=1 + KEY_LEVEL=256
+
+**音频源修正**：原版媒体音频=app 播放的音乐流（非采集）；投屏镜像场景正解 =
+**AudioPlaybackCaptureConfiguration(MediaProjection)**——Android 10+ 公开 API，
+投屏授权即获内部音频权，**无需 root/REMOTE_SUBMIX 特权**
+- ✅ 已修：ScreenCastService 音频采集改走 AudioPlaybackCapture（44100/2/16 对齐官方）
+
+**CarlifeCmdMessage.index 排除**：`total_index` 自增但只进日志（toByteArray 不含），未实现正确
+
 ## 第九轮深挖实证：标准视频推流路径 + 前后台空包 + 双向暂停（Recorder）
 
 **标准视频流**（`Recorder.sendVideoData` + `ConnectManager.writeVideoData` 实证）：
