@@ -55,6 +55,34 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第五轮深挖实证：盒子发现与连接全链路（vivo 版 BleBluetoothDiscover / WifiDirectDiscoverManager）
+
+**发现（BLE）**：
+- `ScanFilter.setServiceUuid("c62857aa-6ca1-4ac4-8842-3ca71aef6765")`——盒子 BLE 服务 UUID
+- 广播名匹配关键词 `"box"`（`TARGET_NAME`，小写包含）
+- 华为 ROM 豁免 UUID 过滤（华为 BLE 的 UUID 过滤有 bug 会不停上报）；`SCAN_MODE_LOW_LATENCY`
+- Timer 定时扫描，最多 20 轮，已连 CarLife 即停；需定位权限
+- 命中后 `saveBoxMac2Local()` 存 ble_mac/ble_name/is_box（配对记忆）
+- `MixConfig.getConnectType() == 13` 才启用（13 = BLE 盒子发现模式）
+
+**连接（BLE → WiFi P2P 秒连）**：
+- `ble2p2p(scanResult)` → `WifiDirectDiscoverManager.connect(name, scanRecord.bytes, null)`
+- `parseSsids(scanRecord)`：BLE Manufacturer Data（AD type 0xFF）有**两段**——第一段跳过（厂商魔数），
+  第二段 = `[16 字节密文][剩余明文]`：
+  `plain = AES_ECB_decrypt(data[0:16]) XOR aesKey()`（密钥即 `H22/emBpCuspF1DYYaJjxQ==`）→
+  `(plain + tail).split(",")` = **[ssid, password, frequency?]**
+- `connectOnThread([name, ssid, password, freq])`：
+  - **SDK ≥ 29**：`connectP2pDeviceBySsid(ssid, password, freq)`——SSID+密码 P2P 直连，免对端发现
+  - **SDK < 29**：经典 P2P discoverPeers → `connectP2pDevice(device)`（invite）
+- P2P 建立后 `onConnectionInfoAvailable(WifiP2pInfo)` 拿 groupOwnerAddress/isGroupOwner
+- 30 秒连接超时（`TimeoutKt.withTimeout(30000)`）；`onConnectChange(5, ...)` = 连接中
+
+**本工程落地**：`BoxBleParser.kt` 完整复刻 parseSsids（UUID 过滤+双 0xFF 段+AES 解密+XOR+split），
+`BoxDiscovery` BLE 扫描已升级为原版同款（UUID/华为豁免/LOW_LATENCY/名过滤/凭据解析），
+UI 卡片直接展示解出的 ssid/pwd/freq——**BLE 一扫即得热点凭据，无需用户输 WiFi 密码**。
+
+**仍未实证**：P2P 建连后的应用层 socket 端口（静态无硬编码）——nmap 实测。
+
 ## 第四轮深挖实证（2026-10 复盘）
 
 **帧头双格式实锤**（`CarlifeCmdMessage.java` toByteArray/fromByteArray）：

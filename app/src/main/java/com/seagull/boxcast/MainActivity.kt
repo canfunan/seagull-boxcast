@@ -209,6 +209,11 @@ fun MainScreen(
                             Text("${b.name}  via=${b.via}", fontSize = 14.sp)
                             Text("${b.host}${b.dataPort?.let { ":$it" } ?: ""}", fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace)
+                            b.credentials?.let { c ->
+                                Text("凭据 ssid=${c.ssid} pwd=${c.password} freq=${c.frequency ?: "-"}",
+                                    fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
                 }

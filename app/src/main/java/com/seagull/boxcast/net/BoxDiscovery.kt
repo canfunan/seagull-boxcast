@@ -4,7 +4,11 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.os.Build
+import android.os.ParcelUuid
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
@@ -45,6 +49,8 @@ class BoxDiscovery(private val context: Context) {
         val host: String,
         val via: String,               // ble / udp / probe
         val dataPort: Int? = null,
+        /** BLE 广播解出的热点凭据（秒连用；parseSsids 实证结构） */
+        val credentials: BoxBleParser.BoxCredentials? = null,
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -64,19 +70,44 @@ class BoxDiscovery(private val context: Context) {
 
     // ---------- 1) BLE ----------
 
+    /**
+     * BLE 扫描（对齐原版 BleBluetoothDiscover.enableBluetooth 实证）：
+     *   ScanFilter.setServiceUuid(c62857aa-...)；华为豁免（UUID 过滤有 bug 不停上报）；
+     *   ScanSettings.setScanMode(1)=LOW_LATENCY；
+     *   命中后 parseSsids 解密广播 → 热点凭据（秒连）。
+     */
     @SuppressLint("MissingPermission")
     fun startBleScan() {
         if (!hasPerm(Manifest.permission.BLUETOOTH_SCAN)) return
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter ?: return
+        val scanner = adapter.bluetoothLeScanner ?: return
+
+        val filters = mutableListOf<ScanFilter>()
+        val isHuawei = Build.BRAND.lowercase().contains("huawei")
+        if (!isHuawei) {
+            filters.add(ScanFilter.Builder()
+                .setServiceUuid(ParcelUuid.fromString(BoxBleParser.BOX_SERVICE_UUID))
+                .build())
+        }
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult?) {
-                val name = result?.scanRecord?.deviceName ?: result?.device?.name ?: return
-                if (NAME_KEYWORDS.any { name.contains(it, ignoreCase = true) }) {
-                    add(Found(name, host = "", via = "ble"))
+                val device = result?.device ?: return
+                val record = result.scanRecord
+                val name = record?.deviceName ?: device.name ?: return
+                // 原版 TARGET_NAME="box"：名含 box（大小写不敏感）
+                if (!name.lowercase().contains(BoxBleParser.BOX_NAME_KEYWORD)) return
+                val creds = record.bytes?.let { BoxBleParser.parse(it) }
+                add(Found(name, host = "", via = "ble", credentials = creds))
+                if (creds != null) {
+                    Log.i(TAG, "BLE box found: name=$name ssid=${creds.ssid} freq=${creds.frequency}")
                 }
             }
         }
-        adapter.bluetoothLeScanner?.startScan(cb)
+        scanner.startScan(filters, settings, cb)
     }
 
     // ---------- 2) UDP 广播 ----------
