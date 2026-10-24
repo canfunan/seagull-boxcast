@@ -28,7 +28,7 @@ import java.io.FileNotFoundException;
 public final class SeagullFileProvider extends ContentProvider {
 
     private static final String TAG = "SeagullFp";
-    public static final String AUTHORITY = "com.seagull.carlauncher.fileprovider";
+    public static final String AUTHORITY = "com.seagull.boxcast.fileprovider";
     private static final String AUTHORITY_PKG = "com.seagull.carlauncher";
     private static volatile android.content.Context sCtx;
 

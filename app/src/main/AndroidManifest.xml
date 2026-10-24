@@ -229,7 +229,7 @@
             android:foregroundServiceType="mediaPlayback" />
 <provider
             android:name="com.seagull.carlauncher.SeagullFileProvider"
-            android:authorities="com.seagull.carlauncher.fileprovider"
+            android:authorities="com.seagull.boxcast.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
