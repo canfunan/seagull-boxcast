@@ -17,7 +17,8 @@ import android.os.IBinder;
  * - START_STICKY：即使被杀，系统会重建服务（通知重新挂上）；
  * - 通知 MIN 级：不响铃不横幅，折叠在通知栏底部不碍眼；
  * - 点击通知回桌面（车机上顺手）；
- * - targetSdk 33 不强制 foregroundServiceType，直接 startForeground。
+ * - targetSdk 35（合并工程）强制 FGS type：startForeground 必须带
+ *   FOREGROUND_SERVICE_TYPE_DATA_SYNC，manifest 同步声明 foregroundServiceType="dataSync"。
  */
 public class KeepAliveService extends Service {
 
@@ -33,7 +34,12 @@ public class KeepAliveService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        startForeground(NOTI_ID, buildNoti(this));
+        Notification n = buildNoti(this);
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTI_ID, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        } else {
+            startForeground(NOTI_ID, n);
+        }
     }
 
     @Override

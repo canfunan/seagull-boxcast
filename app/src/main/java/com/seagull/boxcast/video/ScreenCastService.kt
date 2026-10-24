@@ -58,12 +58,19 @@ class ScreenCastService : Service() {
         }
         when (intent.action) {
             ACTION_START -> {
-                startForeground(NOTIFY_ID, NotificationCompat.Builder(this, CHANNEL_ID)
+                val notif = NotificationCompat.Builder(this, CHANNEL_ID)
                     .setContentTitle("BoxCast")
                     .setContentText("正在向盒子投屏")
                     .setSmallIcon(R.drawable.ic_launcher)
                     .setOngoing(true)
-                    .build())
+                    .build()
+                // targetSdk 35 强制 FGS type（Android 14+）：mediaProjection 与 manifest 声明一致
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startForeground(NOTIFY_ID, notif,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                } else {
+                    startForeground(NOTIFY_ID, notif)
+                }
                 // MediaProjection 非 Parcelable → 全局持有取（MainActivity 授权后放入）
                 val mp = BoxConnectionHolder.projection
                 if (mp == null) {

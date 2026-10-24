@@ -262,7 +262,12 @@ public class MusicService extends Service {
         if (at >= queue.size()) at = 0;
         idx = at;
         try { if (am != null && afr != null) am.requestAudioFocus(afr); } catch (Throwable ignore) { }
-        startForeground(0x5E71, notif(queue.get(at).title, queue.get(at).artist, true));
+        android.app.Notification mn = notif(queue.get(at).title, queue.get(at).artist, true);
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            startForeground(0x5E71, mn, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        } else {
+            startForeground(0x5E71, mn);
+        }
         step(0, false);
     }
 
