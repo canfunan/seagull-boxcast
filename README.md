@@ -55,6 +55,24 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十五轮深挖：vivo 定制版独有资产（白盒密钥/人脸 DMS/Jovi/TurboNet）
+
+**vivo 版 assets 独有**（110MB 未压缩，比 std 版更大）：
+| 资产 | 大小 | 用途 |
+|---|---|---|
+| **whitebox-encrypt.key / whitebox-decrypt.key** | 535KB×2 | **白盒密钥表**——`getWhiteKey()` 的真身在 `libbaiduprotect_sec.so`（stripped arm64，静态逆不出） |
+| carlifevivo_20230221.pkg.so | 1.3MB | vivo 定制功能加固包（jadx 不可解） |
+| pass-key.face-android + ye_base.ldb + occlusion/align/detect/blur 模型 | 1.6MB+ | **人脸活体检测**（DMS 驾驶员监控延伸——遮挡/对齐/检测/模糊模型） |
+| wake.jovi.xiaowei.*.pkg.so | 3.7MB | vivo Jovi 小薇语音唤醒包 |
+| libturbonet.so | 4.9MB | vivo 网络加速库（弱网 QoE） |
+| libesis-wkp/aks.so | 5MB | ESIS 自有互联协议储备（vivo 生态） |
+
+**对投屏的关键影响——白盒密钥**：`AESManagerBox` 的 AES key 不是
+`H22/emBpCuspF1DYYaJjxQ==` 直接解码，而是过 `getWhiteKey()` 白盒变换
+（查 535KB 表）——**我们 BoxCrypto 的恒等假设可能导致 BLE 秒连解密失败**。
+native 层静态逆不出，已提供真机黑盒提取工具 `tools/extract_whitekey.js`
+（Frida hook getWhiteKey/parseSsids，连一次盒子即拿输入输出对）。
+
 ## 第十四轮复盘：消息 ID 全量对齐（抓 6 个错！）+ 业务消息分级
 
 **ID 全量对照（44 个 vs std CommonParams 549 个权威值）**：
