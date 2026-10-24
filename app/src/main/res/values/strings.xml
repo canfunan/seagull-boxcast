@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">BoxCast</string>
+    <string name="acc_desc">允许 BoxCast 在反控模式下向手机注入触摸手势（仅手势，不读取屏幕内容）</string>
 </resources>
-<string name="acc_desc">允许 BoxCast 在反控模式下向手机注入触摸手势（仅手势，不读取屏幕内容）</string>
