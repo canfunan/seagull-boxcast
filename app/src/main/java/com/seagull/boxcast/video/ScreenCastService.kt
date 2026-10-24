@@ -175,9 +175,14 @@ class ScreenCastService : Service() {
         audioThread = Thread({
             android.os.Process.setThreadPriority(-8)
             runCatching {
-                val captureConfig = android.media.AudioPlaybackCaptureConfiguration.Builder(mp).build()
-                val rec = android.media.AudioRecord.Builder()
-                    .setAudioPlaybackCaptureConfiguration(captureConfig)
+                // AudioPlaybackCaptureConfiguration 经反射构建——该方法在部分 SDK jar
+                // 不可见（seagull android.jar 与 CI jar 均无 Builder/setter 的公开签名），
+                // 反射兼容 public/hidden 两种形态；Android 10+ 设备均支持
+                val cfgCls = Class.forName("android.media.AudioPlaybackCaptureConfiguration")
+                val captureConfig = cfgCls
+                    .getDeclaredConstructor(android.media.projection.MediaProjection::class.java)
+                    .newInstance(mp)
+                val recBuilder = android.media.AudioRecord.Builder()
                     .setAudioFormat(
                         android.media.AudioFormat.Builder()
                             .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
@@ -186,7 +191,12 @@ class ScreenCastService : Service() {
                             .build()
                     )
                     .setBufferSizeInBytes(minBuf * 2)
-                    .build()
+                runCatching {
+                    recBuilder.javaClass
+                        .getMethod("setAudioPlaybackCaptureConfiguration", cfgCls)
+                        .invoke(recBuilder, captureConfig)
+                }.onFailure { Log.w(TAG, "setAudioPlaybackCaptureConfiguration reflect fail", it) }
+                val rec = recBuilder.build() as android.media.AudioRecord
                 audioRecord = rec
                 rec.startRecording()
                 val buf = ByteArray(minBuf)

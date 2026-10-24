@@ -67,7 +67,7 @@ class H264Sender(private val conn: BoxConnection) {
             length = length.toLong(),
             height = reqHeight,
         ).encode()
-        conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_START, info.encode())
+        conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_START, info)
         started = true
         Log.i(TAG, "sendH264Start -> 102408 ${reqWidth}x$reqHeight")
     }
@@ -88,7 +88,7 @@ class H264Sender(private val conn: BoxConnection) {
             type = type, frameType = framesType,
             width = width, length = length.toLong(), height = height,
         ).encode()
-        conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_END, info.encode())
+        conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_END, info)
         started = false
         Log.i(TAG, "sendH264End -> 102410")
     }
