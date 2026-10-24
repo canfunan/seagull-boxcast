@@ -20,6 +20,19 @@ object RootKeeper {
     private const val TAG = "RootKeeper"
     private const val PKG = "com.seagull.boxcast"
 
+    /** root 能力状态（UI 展示用） */
+    data class Status(
+        val suAvailable: Boolean = false,
+        val setupDone: Boolean = false,
+        val keepaliveInstalled: Boolean = false,
+        val oomImmune: Boolean = false,
+        val accessibilityOn: Boolean = false,
+        val notifListenerOn: Boolean = false,
+        val dozeWhitelisted: Boolean = false,
+    )
+
+    val status = kotlinx.coroutines.flow.MutableStateFlow(Status())
+
     /** service.d 守护脚本内容（开机执行，常驻循环） */
     private val KEEPALIVE_SCRIPT = """
 #!/system/bin/sh
@@ -41,13 +54,34 @@ done
     fun setup(context: Context) {
         if (!hasSu()) {
             Log.i(TAG, "无 root，跳过（自授权/保活走普通路径）")
+            status.value = Status()
             return
         }
         Log.i(TAG, "root 可用，开始自授权 + 部署保活")
+        status.value = status.value.copy(suAvailable = true)
         grantPermissions()
         grantSpecialOps()
         installKeepAlive()
+        // 回读验证（UI 显示真实状态）
+        status.value = status.value.copy(
+            setupDone = true,
+            keepaliveInstalled = File("/data/adb/service.d/seagull-boxcast-keepalive.sh").exists()
+                || suOut("ls /data/adb/service.d/ 2>/dev/null | grep seagull").isNotEmpty(),
+            accessibilityOn = android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            )?.contains("CastAccessibilityService") == true,
+            notifListenerOn = android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                "enabled_notification_listeners"
+            )?.contains("MediaNotificationListener") == true,
+        )
     }
+
+    private fun suOut(cmd: String): String = runCatching {
+        val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
+        p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
+    }.getOrDefault("")
 
     fun hasSu(): Boolean = runCatching {
         val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
@@ -116,6 +150,12 @@ done
                     val pid = android.os.Process.myPid()
                     // 自身 oom_score_adj 降到最低（有 root 时；无 root 时 Android 已按前台服务保优先级）
                     su("echo -1000 > /proc/$pid/oom_score_adj 2>/dev/null") { }
+                    val adj = runCatching {
+                        File("/proc/$pid/oom_score_adj").readText().trim().toIntOrNull()
+                    }.getOrNull()
+                    if (adj != null && adj <= -900) {
+                        status.value = status.value.copy(oomImmune = true)
+                    }
                 }
                 Thread.sleep(60_000)
             }

@@ -102,7 +102,9 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
+                val rootStatus by com.seagull.boxcast.root.RootKeeper.status.collectAsState()
                 MainScreen(
+                    rootStatus = rootStatus,
                     discovery = discovery,
                     connection = connection!!,
                     injector = injector!!,
@@ -160,6 +162,7 @@ private val RES_PRESETS = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
+    rootStatus: com.seagull.boxcast.root.RootKeeper.Status,
     discovery: BoxDiscovery,
     connection: BoxConnection,
     injector: TouchInjector,
@@ -196,6 +199,31 @@ fun MainScreen(
             Modifier.padding(pad).padding(12.dp).fillMaxSize()
                 .verticalScroll(rememberScrollState())
         ) {
+
+            // ---- Root 能力状态（自授权+保活，用户可见） ----
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (rootStatus.suAvailable)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(
+                        if (rootStatus.suAvailable) "✅ Root 已接入（自授权 + 保活生效）"
+                        else "⚪ 无 Root（普通模式，功能可用）",
+                        fontWeight = FontWeight.Bold, fontSize = 14.sp
+                    )
+                    if (rootStatus.suAvailable) {
+                        Text("保活守护: ${if (rootStatus.keepaliveInstalled) "✓ service.d 常驻" else "…部署中"}  " +
+                             "LMK 免疫: ${if (rootStatus.oomImmune) "✓ -1000" else "…压制中"}", fontSize = 12.sp)
+                        Text("反控无障碍: ${if (rootStatus.accessibilityOn) "✓" else "✗"}  " +
+                             "HUD 歌曲监听: ${if (rootStatus.notifListenerOn) "✓" else "✗"}  " +
+                             "省电白名单: ${if (rootStatus.dozeWhitelisted) "✓" else "…"}", fontSize = 12.sp)
+                    }
+                }
+            }
 
             Text("1. 发现盒子（BLE / UDP / 已知网段探测）", fontWeight = FontWeight.Bold)
             Row {
