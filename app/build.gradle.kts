@@ -68,4 +68,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // JSON（OTA 检查更新用）
     implementation("org.json:json:20240303")
+    // Xposed API 签名桩（LSPosed 模块，仅编译期；无框架时入口不激活）
+    compileOnly(files("libs/xposed-api-82.jar"))
 }
