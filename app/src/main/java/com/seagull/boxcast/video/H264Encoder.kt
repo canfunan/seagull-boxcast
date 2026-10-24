@@ -75,6 +75,9 @@ class H264Encoder(
         )
         running = true
         currentFps = fps
+        currentWidth = width
+        currentHeight = height
+        currentBitrate = bitrate
         Log.i(TAG, "encoder started ${width}x$height @${fps}fps ${bitrate}bps")
     }
 
@@ -121,11 +124,28 @@ class H264Encoder(
         }) }
     }
 
+    /**
+     * 运行时改帧率（对齐协议 MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE=98316，
+     * HU 下发 → Recorder.changeFrameRate → 98317 DONE 闭环）。
+     * MediaCodec 不支持热改帧率，走 reconfigure（旧 codec 重建，短暂花屏）。
+     */
+    fun changeFrameRate(fps: Int) {
+        Log.i(TAG, "changeFrameRate -> $fps (98316 协商)")
+        reconfigure(currentWidth, currentHeight, bitrate = currentBitrate, fps = fps)
+    }
+
+    @Volatile var currentWidth = DEFAULT_WIDTH
+        private set
+    @Volatile var currentHeight = DEFAULT_HEIGHT
+        private set
+    @Volatile var currentBitrate = DEFAULT_BITRATE
+        private set
+
     /** 102401 改帧宽高（盒子侧协商） */
-    fun reconfigure(width: Int, height: Int) {
-        Log.i(TAG, "reconfigure -> ${width}x$height (TODO-CALIBRATE: 与盒子 102401 语义对齐)")
+    fun reconfigure(width: Int, height: Int, bitrate: Int = currentBitrate, fps: Int = currentFps) {
+        Log.i(TAG, "reconfigure -> ${width}x$height @${fps}fps ${bitrate}bps")
         stop()
-        start(width, height)
+        start(width, height, bitrate, fps)
     }
 
     fun stop() {

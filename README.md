@@ -55,6 +55,34 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第六轮深挖实证：官方参数优化体系（AmisConfigManager / VideoResolution / VideoMsgHandler）
+
+**码率/帧率——按车机型号云端下发**（`VideoResolution.getSpecialBitRate` 实证）：
+- AMIS 配置 JSON：`[{"cn":"车型渠道","rate":码率,"frame":帧率,"highrate":bool}]`
+- 运行时按 `getVechileChannel()`（车机型号标识）匹配 → 同时返回专属**码率+帧率**
+- `highrate=true` 且 rate<=0 时置 1（高速通道标记）
+
+**分辨率——三级决策**（`getResolution` 实证）：
+- 用户自定义（TYPE=2）> 白名单推荐（TYPE=1，`KEY_RESOLUTION_WHITELIST`）> 默认（TYPE=0）
+- `KEY_MORE_RESOLUTION` 云端下发更多档位；`SpecialResolution` 特殊编码分辨率（异性屏）
+- 机型门槛：`KEY_CORENUM_DEFINITION`（CPU 核心数）、`KEY_SDK_DEFINITION`（SDK 高清支持）
+
+**帧率——运行时闭环协商**（`VideoMsgHandler` 实证）：
+- HU 下发 `MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE(98316)` → `Recorder.changeFrameRate(fps)`
+  → 回 `MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE_DONE(98317)`——卡顿/负载高时车机主动降帧
+
+**音频优化**：
+- `KEY_PCM_RESAMPLE_BLACKLIST` / `KEY_FIXED_PCM_SAMPLERATE_LIST` / `KEY_RESAMPLE_SWITCH`——PCM 重采样黑白名单（车机音频通道采样率适配）
+- `AAC_SUPPORT` / `MEDIA_SAMPLE_RATE` / `AUDIO_TRANSMISSION_MODE` / `KEY_OPTIMIZE_RECORD`——编码格式与传输模式
+- record/media/tts 三通道独立采样率/格式/声道配置
+
+**屏幕适配**：`KEY_BLACK_SCREEN_SCALE`（黑边名单）、`KEY_REAL_SCREEN_SCALE`、`KEY_HETEROMORPHIC_SCREEN`（刘海/圆角）、`setCalibration`（触摸校准）、`KEY_POINTER_SCALING_FORBIDDEN`
+
+**芯片特判**：SM6375 降 1920x1140（BoxH264Manager）、mt3561→720 宽（2021 h/g.java）
+
+**本工程落地**：`H264Encoder.changeFrameRate()`（98316 协商 → reconfigure → 可接 98317 DONE）；
+UI 参数面板已支持 640x360~1080p / 1-20Mbps / 5-60fps 静态调节。
+
 ## 第五轮深挖实证：盒子发现与连接全链路（vivo 版 BleBluetoothDiscover / WifiDirectDiscoverManager）
 
 **发现（BLE）**：
