@@ -11,9 +11,9 @@ import com.seagull.boxcast.net.BoxConnection
  *   MSG_VIDEO_DATA(131073) 走 VideoSocket(8240)/AOA channel 2
  *
  * 12B 头（Recorder.packageHead 实证，大端）：
- *   [0:4]  dataLen（H.264 长度）
- *   [4:8]  timeStamp（秒级 currentTimeMillis/1000）
- *   [8:12] 固定 00 02 00 01（前台数据）/ 00 02 00 02（后台空包）
+ *   字节 0-3  dataLen（H.264 长度）
+ *   字节 4-7  timeStamp（秒级 currentTimeMillis/1000）
+ *   字节 8-11 固定 00 02 00 01（前台数据）/ 00 02 00 02（后台空包）
  *
  * 空包机制（sendEmptyPacketForeground/Background 实证）：dataLen=0，
  * type=01 前台 / 02 后台——手机退后台时发空包告知车机（不是走消息）。

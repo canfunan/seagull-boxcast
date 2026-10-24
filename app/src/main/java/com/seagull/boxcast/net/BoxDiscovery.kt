@@ -100,7 +100,7 @@ class BoxDiscovery(private val context: Context) {
                 val name = record?.deviceName ?: device.name ?: return
                 // 原版 TARGET_NAME="box"：名含 box（大小写不敏感）
                 if (!name.lowercase().contains(BoxBleParser.BOX_NAME_KEYWORD)) return
-                val creds = record.bytes?.let { BoxBleParser.parse(it) }
+                val creds = record?.bytes?.let { BoxBleParser.parse(it) }
                 add(Found(name, host = "", via = "ble", credentials = creds))
                 if (creds != null) {
                     Log.i(TAG, "BLE box found: name=$name ssid=${creds.ssid} freq=${creds.frequency}")

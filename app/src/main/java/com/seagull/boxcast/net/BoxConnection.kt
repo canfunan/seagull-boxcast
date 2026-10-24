@@ -380,6 +380,7 @@ class BoxConnection(private val appContext: Context) {
                 CarlifeFrame.CmdId.MSG_PERMISSION_LOCATION -> onPermissionRequest?.invoke("location")
                 CarlifeFrame.CmdId.MSG_PERMISSION_READ_WRITE -> onPermissionRequest?.invoke("read_write")
                 CarlifeFrame.CmdId.MSG_PERMISSION_RECORD -> onPermissionRequest?.invoke("record")
+                else -> {}   // 其余消息忽略（Kotlin when 穷尽）
             }
         }.onFailure { Log.w(TAG, "handle frame ${body.serviceType} fail: ${it.message}") }
     }

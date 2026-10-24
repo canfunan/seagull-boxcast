@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
                     discovery = discovery,
                     connection = connection!!,
                     injector = injector!!,
-                    onParamsChanged = { w, h, br, fps ->
+                    onParamsChanged = { w: Int, h: Int, br: Int, fps: Int ->
                         encWidth = w; encHeight = h; encBitrate = br; encFps = fps
                     },
                     onRequestProjection = {

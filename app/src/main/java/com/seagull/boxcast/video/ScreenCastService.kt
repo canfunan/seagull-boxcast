@@ -205,7 +205,7 @@ class ScreenCastService : Service() {
         mediaInfoJob?.cancel()
         mediaInfoJob = java.util.Timer("MediaInfo").apply {
             scheduleAtFixedRate(object : java.util.TimerTask() {
-                private com.seagull.boxcast.net.MediaInfo.Info last = null
+                private var last: com.seagull.boxcast.net.MediaInfo.Info? = null
                 override fun run() {
                     val cur = runCatching {
                         com.seagull.boxcast.net.MediaNotificationListener.currentTrack()
