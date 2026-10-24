@@ -416,7 +416,7 @@ class BoxConnection(private val appContext: Context) {
         // Hello 后：上报手机身份 MD_INFO(65540)（CarlifeConnectHsgHandler:836 实证）+
         // 起心跳。MD_INFO 内容是 Build 全字段，盒子/HU 可据此适配
         runCatching {
-            sendRaw(com.seagull.boxcast.frame.CmdId.MSG_CMD_MD_INFO,
+            sendRaw(com.seagull.boxcast.frame.CarlifeFrame.CmdId.MSG_CMD_MD_INFO,
                 DeviceInfo.encodeMdInfo(), CarlifeFrame.Channel.CMD)
         }
 

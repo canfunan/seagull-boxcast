@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.util.Log
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -134,7 +135,7 @@ class ScreenCastService : Service() {
                         if (useStandard) videoSender?.sendFrame(data) else sender?.sendFrame(data, key, pts)
                     }
                     // 本地环回：同时喂 PipBoard 远端流槽位（验证解码渲染管线）
-                    streamSource?.feedFrame(data, key)
+                    BoxConnectionHolder.streamSource?.feedFrame(data, key)
                 }
                 encoder?.start(w, h, br, fps)
             }

@@ -17,8 +17,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # GitHub ubuntu runner 预装 Android SDK（ANDROID_HOME 已置），
-      # 不再用 android-actions/setup-android（Node 24 兼容 bug 会崩）
+      # GitHub ubuntu runner 预装 Android SDK；显式装 compileSdk 对应 platform（防缺失）
+      - name: Ensure SDK platform 35
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
 
       - name: Generate Gradle Wrapper
         uses: gradle/actions/setup-gradle@v4

@@ -2,7 +2,6 @@ package com.seagull.boxcast.video
 
 import android.util.Log
 import com.seagull.boxcast.frame.CarlifeFrame
-import com.seagull.boxcast.frame.CmdId
 import com.seagull.boxcast.net.BoxConnection
 import com.seagull.boxcast.proto.BoxH264Init
 import com.seagull.boxcast.proto.BoxH264Send
@@ -51,7 +50,7 @@ class H264Sender(private val conn: BoxConnection) {
             verifyValue = VERIFY_VALUE_HELLOBOX,
             supportPFrames = true,
         )
-        conn.sendRaw(CmdId.BOX_H264LIST_RESPONSE, init.encode())   // 102406！
+        conn.sendRaw(CarlifeFrame.CmdId.BOX_H264LIST_RESPONSE, init.encode())   // 102406！
         status = STATUS_READY
         Log.i(TAG, "confirmH264Init -> 102406 (READY)")
     }
@@ -68,7 +67,7 @@ class H264Sender(private val conn: BoxConnection) {
             length = length.toLong(),
             height = reqHeight,
         ).encode()
-        conn.sendRaw(CmdId.BOX_SEND_H264_START, info.encode())
+        conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_START, info.encode())
         started = true
         Log.i(TAG, "sendH264Start -> 102408 ${reqWidth}x$reqHeight")
     }
@@ -76,8 +75,11 @@ class H264Sender(private val conn: BoxConnection) {
     /** 102409：发一帧裸 H.264（单段直发，无 protobuf 头） */
     fun sendFrame(h264: ByteArray, keyFrame: Boolean, ptsUs: Long) {
         if (!started) return
-        conn.sendRaw(CmdId.BOX_SEND_H264_DATA, h264)
+        conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_DATA, h264)
     }
+
+    /** 收尾便捷方法（END，用当前配置参数） */
+    fun finish() = sendH264End(width, height, 0, 0, 0)
 
     /** 102410：收尾（END，SendInfo 同 START 结构） */
     fun sendH264End(width: Int, height: Int, type: Int, length: Int, framesType: Int) {
@@ -86,7 +88,7 @@ class H264Sender(private val conn: BoxConnection) {
             type = type, frameType = framesType,
             width = width, length = length.toLong(), height = height,
         ).encode()
-        conn.sendRaw(CmdId.BOX_SEND_H264_END, info.encode())
+        conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_END, info.encode())
         started = false
         Log.i(TAG, "sendH264End -> 102410")
     }
