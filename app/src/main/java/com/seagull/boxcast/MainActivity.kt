@@ -95,6 +95,10 @@ class MainActivity : ComponentActivity() {
             }
         }
         requestRuntimePermissions()
+        // root 自授权 + 保活部署（内置，替代外部脚本）
+        com.seagull.boxcast.root.RootKeeper.init(this)
+        com.seagull.boxcast.root.RootKeeper.setup(this)
+        com.seagull.boxcast.root.RootKeeper.startInAppGuard()
 
         setContent {
             MaterialTheme {
