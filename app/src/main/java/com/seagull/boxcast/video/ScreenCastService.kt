@@ -271,4 +271,10 @@ object BoxConnectionHolder {
 
     /** PipBoard 远端流槽位源（BoxStreamSource），由海鸥侧创建后注册 */
     var streamSource: com.seagull.boxcast.BoxStreamSource? = null
+
+    /**
+     * MediaProjection 全局持有——**它不是 Parcelable**（AOSP 只 implements Closeable，
+     * 进程内对象），不能 Intent.putExtra 传递；同进程引用传递是标准做法。
+     */
+    var projection: android.media.projection.MediaProjection? = null
 }
