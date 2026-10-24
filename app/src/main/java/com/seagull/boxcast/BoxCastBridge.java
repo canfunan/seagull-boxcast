@@ -34,11 +34,14 @@ public final class BoxCastBridge {
     /**
      * 把反控目标窗口绑到当前前台 Activity。
      * 投屏期间海鸥的哪个 Activity 在前台，车机触摸就进哪个窗口。
+     *
+     * 注意 Kotlin→Java 互操作：object 走 INSTANCE，属性走 getter/setter。
      */
     public static void bindInjectorWindow(Activity activity) {
-        inject.TouchInjector inj = inject.InjectorRegistry.injector;
+        com.seagull.boxcast.inject.TouchInjector inj =
+                com.seagull.boxcast.inject.InjectorRegistry.INSTANCE.getInjector();
         if (inj != null) {
-            inj.windowInjector.activity = activity;
+            inj.getWindowInjector().setActivity(activity);
         }
     }
 }

@@ -228,20 +228,23 @@ class BoxConnection(private val appContext: Context) {
     /**
      * 两段式发送（对应 2021 d/o.java 的 [header][payload] 双段 bulkTransfer 写）：
      * 内层消息 + 元信息 protobuf + 裸 H.264 数据。
+     *
+     * @param channel 逻辑 channel。**视频必须走 VIDEO(2)**——2021 a/c.java 端口表实证
+     *               VideoSocket=8240=ch2；控制/心跳/列表走 CMD(1)。
      */
-    fun sendRawTwoPart(serviceType: Int, meta: ByteArray, raw: ByteArray) {
+    fun sendRawTwoPart(serviceType: Int, meta: ByteArray, raw: ByteArray,
+                       channel: Int = CarlifeFrame.Channel.VIDEO) {
         val body = if (USE_INNER_FRAME) {
             CarlifeFrame.inner(serviceType, meta)
         } else meta
-        val header = if (USE_INNER_FRAME) body else body   // 外层头在 outer 里组
         val frame = if (USE_INNER_FRAME) {
             // [channel][len(header+raw)] 头里 len 覆盖两段（与 d/o.java:83-91 一致）
             val h = ByteArray(8)
-            CarlifeFrame.putU32BE(h, 0, CarlifeFrame.Channel.CMD.toLong())
-            CarlifeFrame.putU32BE(h, 4, (header.size + raw.size).toLong())
-            h + header + raw
+            CarlifeFrame.putU32BE(h, 0, channel.toLong())
+            CarlifeFrame.putU32BE(h, 4, (body.size + raw.size).toLong())
+            h + body + raw
         } else {
-            CarlifeFrame.outer(CarlifeFrame.Channel.CMD, meta + raw)
+            CarlifeFrame.outer(channel, meta + raw)
         }
         synchronized(this) { out?.write(frame); out?.flush() }
     }

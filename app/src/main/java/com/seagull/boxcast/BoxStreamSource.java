@@ -76,7 +76,7 @@ public final class BoxStreamSource implements CanvasSource {
                 java.nio.ByteBuffer buf = decoder.getInputBuffer(in);
                 buf.clear();
                 buf.put(data);
-                decoder.queueInputBuffer(in, 0, data.size,
+                decoder.queueInputBuffer(in, 0, data.length,
                         System.nanoTime() / 1000,
                         keyFrame ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0);
             }
@@ -97,10 +97,13 @@ public final class BoxStreamSource implements CanvasSource {
 
     private void releaseDecoder() {
         configured = false;
-        try {
-            decoder?.stop();
-            decoder?.release();
-        } catch (Exception ignore) {
+        MediaCodec c = decoder;
+        if (c != null) {
+            try {
+                c.stop();
+                c.release();
+            } catch (Exception ignore) {
+            }
         }
         decoder = null;
     }

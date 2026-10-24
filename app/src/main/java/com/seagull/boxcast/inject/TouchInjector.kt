@@ -193,11 +193,20 @@ class TouchInjector(private val appContext: Context) {
             val now = SystemClock.uptimeMillis()
             val ev = MotionEvent.obtain(now, now, action, x, y, 0)
             ev.setSource(4098)
-            if (!windowInjector.inject(ev)) {
-                Log.w(TAG, "window inject fail, downgrade")
+            // Window/ViewRootImpl 非线程安全：读循环在 IO 线程，必须回主线程投递
+            val act = windowInjector.activity
+            if (act != null) {
+                act.runOnUiThread {
+                    if (!windowInjector.inject(ev)) {
+                        Log.w(TAG, "window inject fail, downgrade")
+                        downgrade()
+                    }
+                }
+            } else {
+                Log.w(TAG, "no target activity for WINDOW_API, downgrade")
                 downgrade()
             }
-            ev.recycle()
+            // 不 recycle：注入队列可能异步持有 event（原版 f/y.java 同样不回收）
         } else if (mode == Mode.ROOT_SHELL) {
             // input 命令无流式事件：DOWN 记录、UP 时按点击/滑动一次性下发
             if (action == MotionEvent.ACTION_UP) {
@@ -272,7 +281,7 @@ class TouchInjector(private val appContext: Context) {
         14 -> android.view.KeyEvent.KEYCODE_BACK
         19 -> android.view.KeyEvent.KEYCODE_VOLUME_MUTE
         31 -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY
-        32 -> android.view.KeyEvent.KEYCODE.MEDIA_STOP
+        32 -> android.view.KeyEvent.KEYCODE_MEDIA_STOP
         45 -> android.view.KeyEvent.KEYCODE_STAR
         46 -> android.view.KeyEvent.KEYCODE_POUND
         47 -> android.view.KeyEvent.KEYCODE_DEL

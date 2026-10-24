@@ -151,10 +151,11 @@ class BoxDiscovery(private val context: Context) {
     private fun localGateway(): String? = runCatching {
         val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val ip = wm.dhcpInfo?.gateway ?: return null
+        // DhcpInfo.gateway 是网络序整数：最高位在最高字节 → 大端展开
         InetAddress.getByAddress(
             byteArrayOf(
-                (ip and 0xFF).toByte(), ((ip shr 8) and 0xFF).toByte(),
-                ((ip shr 16) and 0xFF).toByte(), ((ip shr 24) and 0xFF).toByte()
+                ((ip ushr 24) and 0xFF).toByte(), ((ip ushr 16) and 0xFF).toByte(),
+                ((ip ushr 8) and 0xFF).toByte(), (ip and 0xFF).toByte()
             )
         ).hostAddress
     }.getOrNull()

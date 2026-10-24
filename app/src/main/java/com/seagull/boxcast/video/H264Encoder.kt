@@ -88,17 +88,16 @@ class H264Encoder(
 
         override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
             try {
-                if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                    codec.releaseOutputBuffer(index, false)
-                    return
-                }
                 val buf: ByteBuffer = codec.getOutputBuffer(index) ?: run {
                     codec.releaseOutputBuffer(index, false); return
                 }
                 val out = ByteArray(info.size)
                 buf.position(info.offset)
                 buf.get(out, 0, info.size)
-                val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+                // CODEC_CONFIG（SPS/PPS）也发出：解码端（BoxStreamSource/盒子）需要它起解，
+                // 丢弃会导致花屏/黑屏。当关键帧处理，发送端原样转发即可。
+                val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0 ||
+                    info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
                 onFrame(out, key, info.presentationTimeUs)
                 codec.releaseOutputBuffer(index, false)
             } catch (e: Exception) {
