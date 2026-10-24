@@ -11,8 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -188,10 +187,10 @@ fun MainScreen(
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text("BoxCast · 百度互联盒子投屏") }) }) { pad ->
-        // 注意：不能用 verticalScroll 包 LazyColumn（无限高度约束，Compose 运行时直接崩）；
-        // 滚动由两个 LazyColumn（盒子列表/日志）自己负责
+        // 单层滚动：外层 verticalScroll，内部列表用普通 Column（LazyColumn 套 scroll 会崩）
         Column(
             Modifier.padding(pad).padding(12.dp).fillMaxSize()
+                .verticalScroll(rememberScrollState())
         ) {
 
             Text("1. 发现盒子（BLE / UDP / 已知网段探测）", fontWeight = FontWeight.Bold)
@@ -206,8 +205,8 @@ fun MainScreen(
             }
             Text("服务端模式：手机监听 7240/8240/9240/9241/9242/9340 等盒子主动连（真机日志实证）",
                 fontSize = 11.sp)
-            LazyColumn(Modifier.heightIn(max = 120.dp)) {
-                items(boxes) { b ->
+            Column {
+                boxes.forEach { b ->
                     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), onClick = {
                         log("连接 ${b.host} ...")
                         connection.connect(b.host)
@@ -365,8 +364,10 @@ fun MainScreen(
 
             Spacer(Modifier.height(8.dp))
             Text("日志", fontWeight = FontWeight.Bold)
-            LazyColumn(Modifier.heightIn(min = 120.dp)) {
-                items(logs) { l -> Text(l, fontSize = 11.sp, fontFamily = FontFamily.Monospace) }
+            Column {
+                logs.takeLast(50).forEach { l ->
+                    Text(l, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
             }
         }
     }
