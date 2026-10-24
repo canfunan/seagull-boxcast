@@ -87,15 +87,35 @@ class ScreenCastService : Service() {
                 startAudioCapture(mp)
                 // 双视频路径：盒子点播（102409 裸帧，H264Sender）+
                 // 标准 CarLife 推流（131073 + 12B 头 on channel 2，VideoSender）。
-                // 用哪个由 extras 开关决定（实测校准后固定）
+                // 标准路径走 VideoHandshake 状态机：等 HU 的 INIT(98312) 配编码器、
+                // 回 INIT_DONE(98317)、等 START(98313) 才推流（VideoMsgHandler 实证）
                 videoSender = VideoSender(conn)
+                handshake = VideoHandshake(conn)
                 val useStandard = intent.getBooleanExtra(EXTRA_USE_STANDARD_VIDEO, true)
                 videoSender?.sendEmptyForeground()
 
+                handshake?.onConfigureEncoder = { hw, hh, hf ->
+                    encoder?.changeFrameRate(hf)   // 按 HU 期望调整（分辨率同理由 reconfigure 处理）
+                    handshake?.encWidth = hw; handshake?.encHeight = hh; handshake?.encFps = hf
+                    handshake?.sendInitDone()
+                }
+                handshake?.onStartStreaming = { handshakeStarted = true }
+                handshake?.onPauseStreaming = { handshakeStarted = false }
+                handshake?.onFrameRateChange = { f -> encoder?.changeFrameRate(f) }
+                conn.onVideoEncoderInit = { hw, hh, hf -> handshake?.onEncoderInit(hw, hh, hf) }
+                conn.onVideoEncoderStart = { handshake?.onEncoderStart() }
+                conn.onVideoEncoderPause = { handshake?.onEncoderPause() }
+                conn.onVideoEncoderReset = { handshake?.onEncoderReset() }
+                conn.onVideoFrameRateChange = { f -> handshake?.onFrameRateChange(f) }
+                conn.onVersionMatch = { handshake?.onVersionMatch() }
+
                 encoder = H264Encoder(mp, dm) { data, key, pts ->
-                    if (useStandard) videoSender?.sendFrame(data) else sender?.sendFrame(data, key, pts)
-                    // 本地环回：同时喂 PipBoard 远端流槽位（验证解码渲染管线；
-                    // 盒子来流协议实测后改为 BoxConnection 分发喂入）
+                    // 标准路径：必须等 HU START（98313）；点播路径：等 102407（sender.started）
+                    val allow = if (useStandard) handshakeStarted else sender?.started == true
+                    if (allow) {
+                        if (useStandard) videoSender?.sendFrame(data) else sender?.sendFrame(data, key, pts)
+                    }
+                    // 本地环回：同时喂 PipBoard 远端流槽位（验证解码渲染管线）
                     streamSource?.feedFrame(data, key)
                 }
                 encoder?.start(w, h, br, fps)
@@ -116,6 +136,8 @@ class ScreenCastService : Service() {
     private var audioThread: Thread? = null
     private var audioSender: com.seagull.boxcast.audio.AudioChannel.Sender? = null
     private var videoSender: VideoSender? = null
+    private var handshake: VideoHandshake? = null
+    private var handshakeStarted = false
 
     /**
      * 内部音频采集（AudioPlaybackCapture，Android 10+ 公开 API）：
@@ -163,6 +185,7 @@ class ScreenCastService : Service() {
         sender?.finish()
         videoSender?.sendEmptyBackground()
         encoder?.stop()
+        handshakeStarted = false
         audioThread?.interrupt()
         audioSender?.stop()
         runCatching { audioRecord?.stop(); audioRecord?.release() }

@@ -49,6 +49,25 @@ object CarlifeFrame {
         const val MSG_VIDEO_DATA = 131073
         const val MSG_VIDEO_HEARTBEAT = 131074
 
+        // 视频编码器握手（VideoMsgHandler 实证：INIT→INIT_DONE→START→推流）
+        const val MSG_CMD_VIDEO_ENCODER_INIT = 98312
+        const val MSG_CMD_VIDEO_ENCODER_START = 98313
+        const val MSG_CMD_VIDEO_ENCODER_PAUSE = 98314
+        const val MSG_CMD_VIDEO_ENCODER_RESET = 98315
+        const val MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE = 98316
+        const val MSG_CMD_VIDEO_ENCODER_INIT_DONE = 98317
+        const val MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE_DONE = 98318
+        const val MSG_CMD_VIDEO_ADAPT_DONE = 98319
+
+        // 握手/版本/统计（CarlifeConnectHsgHandler addMsg 全集实证）
+        const val MSG_CMD_HU_INFO = 98307
+        const val MSG_CMD_HU_PROTOCOL_VERSION = 98308
+        const val MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS = 65538
+        const val MSG_CMD_MD_INFO = 65540
+        const val MSG_CMD_STATISTIC_INFO = 65539
+        const val MSG_CMD_VEHICLE_FOREGROUND = 98455
+        const val MSG_CMD_VEHICLE_BACKGROUND = 98456
+
         // 音频段（CommonParams 实证；channel 3=媒体 4=TTS 5=VR）
         // 媒体音频 196xxx
         const val MSG_MEDIA_INIT = 196609

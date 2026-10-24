@@ -107,6 +107,14 @@ class BoxConnection(private val appContext: Context) {
     /** 盒子→手机 102407（请求发送，带宽高/长度）：应回 sendH264Start() */
     var onH264SendRequest: ((com.seagull.boxcast.proto.BoxH264Send) -> Unit)? = null
 
+    // 标准视频握手（VideoMsgHandler 实证）
+    var onVideoEncoderInit: ((width: Int, height: Int, fps: Int) -> Unit)? = null
+    var onVideoEncoderStart: (() -> Unit)? = null
+    var onVideoEncoderPause: (() -> Unit)? = null
+    var onVideoEncoderReset: (() -> Unit)? = null
+    var onVideoFrameRateChange: ((fps: Int) -> Unit)? = null
+    var onVersionMatch: (() -> Unit)? = null
+
     val authorizedCode: Int
         get() = (state.value as? State.Authorized)?.code ?: BoxTypes.IS_NOT_BOX
 
@@ -237,6 +245,19 @@ class BoxConnection(private val appContext: Context) {
                     InjectorRegistry.injector?.inject(TouchProto.TouchAction.decode(body.data))
                 CmdId.TOUCH_CAR_HARD_KEY_CODE ->
                     InjectorRegistry.injector?.injectKey(TouchProto.HardKeyCode.decode(body.data).keycode)
+                // 标准视频握手（HU → 手机）
+                CmdId.MSG_CMD_VIDEO_ENCODER_INIT -> {
+                    val info = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)
+                    onVideoEncoderInit?.invoke(info.width, info.height, info.frameType)
+                }
+                CmdId.MSG_CMD_VIDEO_ENCODER_START -> onVideoEncoderStart?.invoke()
+                CmdId.MSG_CMD_VIDEO_ENCODER_PAUSE -> onVideoEncoderPause?.invoke()
+                CmdId.MSG_CMD_VIDEO_ENCODER_RESET -> onVideoEncoderReset?.invoke()
+                CmdId.MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE -> {
+                    val info = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)
+                    onVideoFrameRateChange?.invoke(info.frameType)
+                }
+                CmdId.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS -> onVersionMatch?.invoke()
             }
         }.onFailure { Log.w(TAG, "handle frame ${body.serviceType} fail: ${it.message}") }
     }

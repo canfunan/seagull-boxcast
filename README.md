@@ -55,6 +55,27 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第十一轮深挖：视频编码器握手（对照原版消息全集 60 项）
+
+**CarlifeConnectHsgHandler addMsg 全集对照**——原版手机端实际处理 60 类消息，我们只覆盖盒子 1024xx + 触摸段。核心缺口：**标准视频握手**。
+
+**VideoHandshake 流程**（VideoMsgHandler:75-129 实证）：
+```
+HU → 手机：VIDEO_ENCODER_INIT(98312)  {HU 屏幕宽高/帧率期望}
+手机：未初始化则按 INIT 参数配编码器（initMediaCodec）
+手机 → HU：VIDEO_ENCODER_INIT_DONE(98317) {CarlifeVideoEncoderInfo{width,height,frameRate}}
+HU → 手机：VIDEO_ENCODER_START(98313) → resumeFromHeadUnit + startRecord
+推流门控：**必须等 START**（旧实现连上就推，HU 未备好解码器=丢流）
+PAUSE(98314)/RESET(98315)/FRAME_RATE_CHANGE(98316)→98318 DONE
+PROTOCOL_VERSION_MATCH_STATUS(65538) → 回 STATISTIC_INFO(65539) + VIDEO_HEARTBEAT(131074)
+```
+
+**落地**：`video/VideoHandshake.kt`（状态机 IDLE→INITED→STARTED/PAUSED + INIT_DONE 回报 + 版本匹配响应）；
+BoxConnection 增 6 个握手回调路由；ScreenCastService 标准路径加 START 门控（点播路径仍由 102407 驱动，双模兼容）。
+
+**仍待补（按优先级）**：HU_INFO(98307) 屏幕参数解析、MD_INFO(65540) 连接后主动上报身份、
+PERMISSION_*(983xx) HU 索权处理、亮灭屏前后台(98455/98456) 省电、断连自动重连。
+
 ## 第十轮全量通读对照：传输层/线程安全/编码参数/音频源 4 类修正
 
 **ConnectSocket 对照（787 行通读）**：
