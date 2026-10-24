@@ -49,7 +49,12 @@ class ScreenCastService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        if (intent == null) {
+            // START_STICKY 重启时 intent 为 null（MediaProjection 不可持久化）→ 直接退，别僵尸
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        when (intent.action) {
             ACTION_START -> {
                 startForeground(NOTIFY_ID, NotificationCompat.Builder(this, CHANNEL_ID)
                     .setContentTitle("BoxCast")

@@ -162,21 +162,34 @@ class BoxConnection(private val appContext: Context) {
             com.seagull.boxcast.frame.CmdMessage(channel, payload)
         }
         Log.i(TAG, "recv serviceType=${body.serviceType} len=${body.data.size}")
-        when (body.serviceType) {
-            CmdId.BOX_HELLO -> onHello(BoxHello.decode(body.data))
-            CmdId.BOX_VEHCILE_STATE -> _vehicleState.value = BoxVehicleState.decode(body.data)
-            CmdId.BOX_H264LIST_RESPONSE -> onH264List(BoxH264List.decode(body.data))
-            CmdId.BOX_CHECK_UPDATE_RES -> { /* OTA 结果，交给上层解析 */ }
-            // 盒子→手机 H.264 点播请求（BoxH264Manager 实证方向）
-            CmdId.BOX_H264LIST_REQUEST -> onH264ListRequest?.invoke()
-            CmdId.BOX_SEND_H264_REQUEST ->
-                onH264SendRequest?.invoke(com.seagull.boxcast.proto.BoxH264Send.decode(body.data))
-            // 反控：车机/盒子触摸与硬按键 → 注入手机
-            CmdId.TOUCH_ACTION ->
-                InjectorRegistry.injector?.inject(TouchProto.TouchAction.decode(body.data))
-            CmdId.TOUCH_CAR_HARD_KEY_CODE ->
-                InjectorRegistry.injector?.injectKey(TouchProto.HardKeyCode.decode(body.data).keycode)
-        }
+        // 单条消息解析失败不影响连接（畸形包/半包保护）
+        runCatching {
+            when (body.serviceType) {
+                CmdId.BOX_HELLO -> onHello(BoxHello.decode(body.data))
+                CmdId.BOX_VEHCILE_STATE -> _vehicleState.value = BoxVehicleState.decode(body.data)
+                CmdId.BOX_H264LIST_RESPONSE -> onH264List(BoxH264List.decode(body.data))
+                CmdId.BOX_CHECK_UPDATE_RES -> { /* OTA 结果，交给上层解析 */ }
+                // 盒子→手机 H.264 点播请求（BoxH264Manager 实证方向）
+                CmdId.BOX_H264LIST_REQUEST -> onH264ListRequest?.invoke()
+                CmdId.BOX_SEND_H264_REQUEST -> {
+                    val req = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)
+                    // 同步盒子分辨率到反控坐标映射（否则触摸坐标按默认 1920x1080 算全错）
+                    if (req.width > 0 && req.height > 0) {
+                        InjectorRegistry.injector?.let {
+                            it.boxWidth = req.width
+                            it.boxHeight = req.height
+                        }
+                        Log.i(TAG, "box resolution sync: ${req.width}x${req.height}")
+                    }
+                    onH264SendRequest?.invoke(req)
+                }
+                // 反控：车机/盒子触摸与硬按键 → 注入手机
+                CmdId.TOUCH_ACTION ->
+                    InjectorRegistry.injector?.inject(TouchProto.TouchAction.decode(body.data))
+                CmdId.TOUCH_CAR_HARD_KEY_CODE ->
+                    InjectorRegistry.injector?.injectKey(TouchProto.HardKeyCode.decode(body.data).keycode)
+            }
+        }.onFailure { Log.w(TAG, "handle frame ${body.serviceType} fail: ${it.message}") }
     }
 
     // ---------- Hello / 授权（verifyBoxTag 复刻） ----------

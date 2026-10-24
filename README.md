@@ -55,6 +55,20 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第四轮深挖实证（2026-10 复盘）
+
+**帧头双格式实锤**（`CarlifeCmdMessage.java` toByteArray/fromByteArray）：
+- channel ∈ {1,6}（Cmd/Touch）→ **8 字节头** `[length:u16 BE][reserved:u16 BE][serviceType:u32 BE]`
+- channel ∈ {2,3,4,5}（Video/Media/TTS/VR）→ **12 字节头** `[length:u32 BE][?:u32 BE][serviceType:u32 BE]`
+- 盒子点播协议（1024xx）全部 `new CarlifeCmdMessage(true)` → **mChannel=1，8 字节头**——本工程 `inner()` 实现与实证一致
+- `Wire.kt` protobuf 编解码已通过 round-trip 交叉验证（含 int32/int64 边界值）
+
+**消息路由实锤**（`CarlifeConnectHsgHandler:772-780`）：
+- 102403 Hello → `setBoxAuthorized(3)` 预设 → `BleBluetoothDiscover.saveBleMac2Local()`（**BLE 发现盒子存 MAC 是连接前置**）→ `recvBoxHello`（tag 细化）→ `BoxH264Manager.init` + 统计
+- **授权码不禁用流程**：原版 tag 不符也继续 init H.264——本工程 UI 门限已对齐（Hello 收到即可投屏，授权码仅展示）
+- 102401 CHANGE_FRAME_WH：全代码无使用方（预留常量），发送无接收方
+- TCP 角色/端口：静态无实证（连接建立在 ConnectClient 层，未挖到硬编码端口）——留 nmap 实测
+
 ## 待校准（真盒子实测）
 
 1. 盒子数据端口（候选 7240/8240/9340/9800/18899/40001）

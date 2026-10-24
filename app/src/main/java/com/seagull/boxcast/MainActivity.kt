@@ -332,7 +332,9 @@ fun MainScreen(
             Text("6. 控制", fontWeight = FontWeight.Bold)
             Row {
                 Button(
-                    enabled = (state as? BoxConnection.State.Authorized)?.code == BoxTypes.IS_BOX_AND_AUTHORIZED,
+                    // 授权码仅展示/日志：原版收到 Hello 即继续 init BoxH264Manager（tag 不符也投），
+                    // 我们同样放行——算法若有偏差不至于卡死（CarlifeConnectHsgHandler:772-780 实证）
+                    enabled = state is BoxConnection.State.Authorized,
                     onClick = onRequestProjection
                 ) { Text("开始投屏") }
                 Spacer(Modifier.width(8.dp))
