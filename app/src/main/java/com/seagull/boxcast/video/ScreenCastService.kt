@@ -70,9 +70,11 @@ class ScreenCastService : Service() {
                 val br = intent.getIntExtra(EXTRA_BITRATE, H264Encoder.DEFAULT_BITRATE)
                 val fps = intent.getIntExtra(EXTRA_FPS, H264Encoder.DEFAULT_FPS)
 
-                sender = H264Sender(conn).apply {
-                    configure(w, h)
-                    requestStart(verifyValue = "", supportPFrames = true)
+                sender = H264Sender(conn).apply { configure(w, h) }
+                // 盒子点播驱动（不能主动发）：102405 → confirmH264Init；102407 → sendH264Start
+                conn.onH264ListRequest = { sender?.confirmH264Init() }
+                conn.onH264SendRequest = { req ->
+                    sender?.sendH264Start(req.width, req.height, req.type, req.length.toInt(), req.frameType)
                 }
                 encoder = H264Encoder(mp, dm) { data, key, pts ->
                     sender?.sendFrame(data, key, pts)

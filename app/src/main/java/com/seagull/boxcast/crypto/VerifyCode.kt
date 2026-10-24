@@ -7,17 +7,21 @@ import java.security.MessageDigest
 /**
  * 盒子认证 tag 计算（复刻 BoxConnectClient.verifyBoxTag）。
  *
- * 逆向实证：
+ * 逆向实证（libencryption.so，arm64，带 DWARF；rizin 反汇编 + 行号映射）：
  *   preMd5 = type + "_" + mac + "_" + active + "_" + randomvalue
- *   verifyCode = EncryptionUtils.getVerifyCode(context, preMd5)   ← native(libencryption.so)
+ *   verifyCode = getVerifyCode(context, preMd5)
  *   isTagMatch = tag.equals(verifyCode)
  *
- * getVerifyCode 为 System.loadLibrary("encryption") 的 native 方法，1.4MB so。
- * 两条路径：
- *   1) [Native]：把 vivo 版 APK 里的 libencryption.so 放到 app/src/main/jniLibs/arm64-v8a/
- *      并放开 build.gradle.kts 中 jniLibs 配置——本类自动加载并调用（最保真）。
- *   2) [Fallback]：纯算法候选（MD5/SHA-1/SHA-256 的 hex / base64 变体）。
- *      因为输入拼接完全已知，抓包对比一次即可锁定是哪一种。
+ * getVerifyCode 内部（encryption.cpp:33-76 全实锤）：
+ *   1. GetStringUTFChars(input) → std::string s
+ *   2. s.append("CARLIFE")                    ← 盐，0x2d8a3，encryption.cpp:72
+ *   3. MD5(s).toStr() → 小写 hex              ← HEX_NUMBERS="0123456789abcdef" @0x2d930
+ *   4. NewStringUTF(hex) → 返回
+ *   附加：Context→PackageManager→GET_SIGNATURES→strcmp 准入校验（encryption.cpp:67）——
+ *         **调用方 APK 签名不符则拒算**。所以我们自己的 APK 调 native so 会被拒，
+ *         但算法已逆出，纯 Java 离线算 tag 即可，无需 native。
+ *
+ * 因此本工程直接走纯算法：verifyCode = md5_hex_lower(input + "CARLIFE")。
  */
 object VerifyCode {
 
@@ -62,24 +66,25 @@ object VerifyCode {
     }
 
     /**
-     * 纯算法回退：输出 hex 与 base64 两种常见形态。
-     * TODO-CALIBRATE: 抓到一次真实 Hello（盒子 tag 已知）后，
-     * 用 [matchKnown] 锁定算法，然后把候选收敛成一个。
+     * 纯算法实现（libencryption.so 实证）：
+     * verifyCode = md5_hex_lower(input + "CARLIFE")
      */
-    fun fallback(input: String): String {
-        // 默认给 MD5-hex（车载盒子最常见）；实测不符再切
-        return md5Hex(input)
-    }
+    fun fallback(input: String): String = md5Hex(input + SALT)
 
-    /** 已知一次真实 tag 时，反查是哪种算法（联调工具） */
+    /** 盐（encryption.cpp:72 append 的常量，0x2d8a3） */
+    const val SALT = "CARLIFE"
+
+    /**
+     * 联调自检：已知一次真实 Hello（tag 已知）时反查算法。
+     * 命中 "md5-hex-salted" 即与逆向实证一致。
+     */
     fun matchKnown(input: String, expectedTag: String): String? {
         val candidates = mapOf(
-            "md5-hex" to md5Hex(input),
-            "md5-base64" to md5B64(input),
-            "sha1-hex" to shaHex(input, "SHA-1"),
-            "sha1-base64" to shaB64(input, "SHA-1"),
-            "sha256-hex" to shaHex(input, "SHA-256"),
-            "sha256-base64" to shaB64(input, "SHA-256"),
+            "md5-hex-salted" to md5Hex(input + SALT),
+            "md5-hex-raw" to md5Hex(input),
+            "md5-b64-salted" to md5B64(input + SALT),
+            "sha1-hex-salted" to shaHex(input + SALT, "SHA-1"),
+            "sha256-hex-salted" to shaHex(input + SALT, "SHA-256"),
         )
         return candidates.entries.firstOrNull { it.value == expectedTag }?.key
     }

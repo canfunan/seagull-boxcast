@@ -116,16 +116,16 @@ data class BoxH264List(
 }
 
 /**
- * 102408 MSG_CMD_BOX_SEND_H264_START（H264Init）：
- * 1=timeStamp(i64), 2=verifyValue(str), 3=supportPFrames(bool)
+ * 102406 MSG_CMD_BOX_H264LIST_RESPONSE（H264Init）——confirmH264Init 实证：
+ * 1=timeStamp(i32 秒级), 2=verifyValue(str, 硬编码 "hellobox"), 3=supportPFrames(bool)
  */
 data class BoxH264Init(
-    val timeStamp: Long = 0,          // 1
-    val verifyValue: String = "",     // 2
-    val supportPFrames: Boolean = false, // 3
+    val timeStamp: Long = 0,          // 1（秒级 int32，varint 编码）
+    val verifyValue: String = "hellobox",  // 2 硬编码实证
+    val supportPFrames: Boolean = true,    // 3
 ) {
     fun encode(): ByteArray = Wire.Writer().apply {
-        int64(1, timeStamp)
+        int32(1, timeStamp.toInt())
         string(2, verifyValue)
         bool(3, supportPFrames)
     }.toByteArray()
@@ -136,7 +136,7 @@ data class BoxH264Init(
             while (!atEnd()) {
                 val (f, w) = readTag()
                 when (f) {
-                    1 -> m = m.copy(timeStamp = readInt64())
+                    1 -> m = m.copy(timeStamp = readInt32().toLong())
                     2 -> m = m.copy(verifyValue = readString())
                     3 -> m = m.copy(supportPFrames = readBool())
                     else -> skip(w)
@@ -148,27 +148,26 @@ data class BoxH264Init(
 }
 
 /**
- * 102409 MSG_CMD_BOX_SEND_H264_DATA（H264Send）：
- * 字段 1=int32, 2=int32, 3=int32, 4=int64, 5=str, 6=bool, 7=int32
- * getter 集合：type/frameType/width/height/needPFrames/verifyValue/timeStamp
- *
- * TODO-CALIBRATE: 1/2/3/7 与 type/frameType/width/height 的精确对应未逐一验证，
- * 抓包后校准（HEX 首字节即可判断：field1 tag 0x08, field2 0x10, field3 0x18, field7 0x38）。
+ * 102408/102410 的 SendInfo（CarlifeBoxH264SendInfo）——sendH264Start/sendH264End 实证字段：
+ * 1=type(int) 2=frameType(int) 3=width(int) 4=length(int64) 5=verifyValue(str)
+ * 6=needPFrames(bool) 7=height(int)
+ * 实锤来源：BoxH264Manager.sendH264Start 的 setWidth(3)/setHeight(7)/setType(1)/
+ * setLength(4,int64)/setFrameType(2) 调用序。
  */
 data class BoxH264Send(
-    val type: Int = 0,              // 1  TODO-CALIBRATE
-    val frameType: Int = 0,         // 2  0=?,1=I,2=P（按帧头推断）
-    val width: Int = 0,             // 3  TODO-CALIBRATE
-    val timeStamp: Long = 0,        // 4
+    val type: Int = 0,              // 1
+    val frameType: Int = 0,         // 2  帧类型（I/P）
+    val width: Int = 0,             // 3
+    val length: Long = 0,           // 4  int64！数据长度
     val verifyValue: String = "",   // 5
     val needPFrames: Boolean = false, // 6
-    val height: Int = 0,            // 7  TODO-CALIBRATE
+    val height: Int = 0,            // 7
 ) {
     fun encode(): ByteArray = Wire.Writer().apply {
         int32(1, type)
         int32(2, frameType)
         int32(3, width)
-        int64(4, timeStamp)
+        int64(4, length)
         string(5, verifyValue)
         bool(6, needPFrames)
         int32(7, height)
@@ -183,7 +182,7 @@ data class BoxH264Send(
                     1 -> m = m.copy(type = readInt32())
                     2 -> m = m.copy(frameType = readInt32())
                     3 -> m = m.copy(width = readInt32())
-                    4 -> m = m.copy(timeStamp = readInt64())
+                    4 -> m = m.copy(length = readInt64())
                     5 -> m = m.copy(verifyValue = readString())
                     6 -> m = m.copy(needPFrames = readBool())
                     7 -> m = m.copy(height = readInt32())

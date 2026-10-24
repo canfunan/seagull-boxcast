@@ -87,6 +87,12 @@ class BoxConnection(private val appContext: Context) {
     var lastHello: BoxHello? = null
         private set
 
+    /** 盒子→手机 102405（请求 H.264 初始化）：应回 confirmH264Init() */
+    var onH264ListRequest: (() -> Unit)? = null
+
+    /** 盒子→手机 102407（请求发送，带宽高/长度）：应回 sendH264Start() */
+    var onH264SendRequest: ((com.seagull.boxcast.proto.BoxH264Send) -> Unit)? = null
+
     val authorizedCode: Int
         get() = (state.value as? State.Authorized)?.code ?: BoxTypes.IS_NOT_BOX
 
@@ -161,6 +167,10 @@ class BoxConnection(private val appContext: Context) {
             CmdId.BOX_VEHCILE_STATE -> _vehicleState.value = BoxVehicleState.decode(body.data)
             CmdId.BOX_H264LIST_RESPONSE -> onH264List(BoxH264List.decode(body.data))
             CmdId.BOX_CHECK_UPDATE_RES -> { /* OTA 结果，交给上层解析 */ }
+            // 盒子→手机 H.264 点播请求（BoxH264Manager 实证方向）
+            CmdId.BOX_H264LIST_REQUEST -> onH264ListRequest?.invoke()
+            CmdId.BOX_SEND_H264_REQUEST ->
+                onH264SendRequest?.invoke(com.seagull.boxcast.proto.BoxH264Send.decode(body.data))
             // 反控：车机/盒子触摸与硬按键 → 注入手机
             CmdId.TOUCH_ACTION ->
                 InjectorRegistry.injector?.inject(TouchProto.TouchAction.decode(body.data))
