@@ -9,11 +9,11 @@ import javax.crypto.spec.SecretKeySpec
  * 盒子 BLE 广播解析（复刻 vivo 版 WifiDirectDiscoverManager.parseSsids，:415-451）。
  *
  * 实证结构（Manufacturer Specific Data, AD type 0xFF）：
- *   scanRecord 里有多个 BLE AD structure（[len][type][value...]）
+ *   scanRecord 里有多个 BLE AD structure（len/type/value 三段式）
  *   第 1 个 type=0xFF 段：跳过（厂商魔数）
  *   第 2 个 type=0xFF 段：value = [16 字节密文][剩余明文]
- *     plain = AES_ECB_decrypt(value[0:16]) XOR aesKey()   // 密钥 H22/emBpCuspF1DYYaJjxQ==
- *     result = (new String(plain) + new String(value[16:])).split(",")
+ *     plain = AES_ECB_decrypt(value 前 16 字节) XOR aesKey()  // 密钥 H22/emBpCuspF1DYYaJjxQ==
+ *     result = (new String(plain) + new String(value 其余字节)).split(",")
  *     → [ssid, password, frequency?]
  *
  * 用途：BLE 一扫即得热点凭据 → WiFi P2P/热点直连，无需用户输密码（"秒连"原理）。

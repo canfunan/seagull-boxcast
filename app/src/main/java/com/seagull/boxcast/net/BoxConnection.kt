@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.seagull.boxcast.crypto.VerifyCode
 import com.seagull.boxcast.frame.CarlifeFrame
-import com.seagull.boxcast.frame.CmdId
 import com.seagull.boxcast.frame.FrameReader
 import com.seagull.boxcast.frame.parseInner
 import com.seagull.boxcast.inject.InjectorRegistry
@@ -324,13 +323,13 @@ class BoxConnection(private val appContext: Context) {
         // 单条消息解析失败不影响连接（畸形包/半包保护）
         runCatching {
             when (body.serviceType) {
-                CmdId.BOX_HELLO -> onHello(BoxHello.decode(body.data))
-                CmdId.BOX_VEHCILE_STATE -> _vehicleState.value = BoxVehicleState.decode(body.data)
-                CmdId.BOX_H264LIST_RESPONSE -> onH264List(BoxH264List.decode(body.data))
-                CmdId.BOX_CHECK_UPDATE_RES -> { /* OTA 结果，交给上层解析 */ }
+                CarlifeFrame.CmdId.BOX_HELLO -> onHello(BoxHello.decode(body.data))
+                CarlifeFrame.CmdId.BOX_VEHCILE_STATE -> _vehicleState.value = BoxVehicleState.decode(body.data)
+                CarlifeFrame.CmdId.BOX_H264LIST_RESPONSE -> onH264List(BoxH264List.decode(body.data))
+                CarlifeFrame.CmdId.BOX_CHECK_UPDATE_RES -> { /* OTA 结果，交给上层解析 */ }
                 // 盒子→手机 H.264 点播请求（BoxH264Manager 实证方向）
-                CmdId.BOX_H264LIST_REQUEST -> onH264ListRequest?.invoke()
-                CmdId.BOX_SEND_H264_REQUEST -> {
+                CarlifeFrame.CmdId.BOX_H264LIST_REQUEST -> onH264ListRequest?.invoke()
+                CarlifeFrame.CmdId.BOX_SEND_H264_REQUEST -> {
                     val req = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)
                     // 同步盒子分辨率到反控坐标映射（否则触摸坐标按默认 1920x1080 算全错）
                     if (req.width > 0 && req.height > 0) {
@@ -343,44 +342,44 @@ class BoxConnection(private val appContext: Context) {
                     onH264SendRequest?.invoke(req)
                 }
                 // 反控：车机/盒子触摸与硬按键 → 注入手机
-                CmdId.TOUCH_ACTION ->
+                CarlifeFrame.CmdId.TOUCH_ACTION ->
                     InjectorRegistry.injector?.inject(TouchProto.TouchAction.decode(body.data))
-                CmdId.TOUCH_CAR_HARD_KEY_CODE ->
+                CarlifeFrame.CmdId.TOUCH_CAR_HARD_KEY_CODE ->
                     InjectorRegistry.injector?.injectKey(TouchProto.HardKeyCode.decode(body.data).keycode)
                 // 标准视频握手（HU → 手机）
-                CmdId.MSG_CMD_VIDEO_ENCODER_INIT -> {
+                CarlifeFrame.CmdId.MSG_CMD_VIDEO_ENCODER_INIT -> {
                     val info = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)
                     onVideoEncoderInit?.invoke(info.width, info.height, info.frameType)
                 }
-                CmdId.MSG_CMD_VIDEO_ENCODER_START -> onVideoEncoderStart?.invoke()
-                CmdId.MSG_CMD_VIDEO_ENCODER_PAUSE -> onVideoEncoderPause?.invoke()
-                CmdId.MSG_CMD_VIDEO_ENCODER_RESET -> onVideoEncoderReset?.invoke()
-                CmdId.MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE -> {
+                CarlifeFrame.CmdId.MSG_CMD_VIDEO_ENCODER_START -> onVideoEncoderStart?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_VIDEO_ENCODER_PAUSE -> onVideoEncoderPause?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_VIDEO_ENCODER_RESET -> onVideoEncoderReset?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_VIDEO_ENCODER_FRAME_RATE_CHANGE -> {
                     val info = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)
                     onVideoFrameRateChange?.invoke(info.frameType)
                 }
-                CmdId.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS -> onVersionMatch?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS -> onVersionMatch?.invoke()
                 // 加密握手（标准 HU）
-                CmdId.MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE ->
+                CarlifeFrame.CmdId.MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE ->
                     encryptHandshake.onRsaResponse(body.data)
-                CmdId.MSG_CMD_HU_AES_REC_RESPONSE -> encryptHandshake.onAesRecResponse()
+                CarlifeFrame.CmdId.MSG_CMD_HU_AES_REC_RESPONSE -> encryptHandshake.onAesRecResponse()
                 // HU 统计上报（渠道号认证：carNumber/carType = 车型渠道数据源）
-                CmdId.MSG_CMD_STATISTIC_INFO -> {
+                CarlifeFrame.CmdId.MSG_CMD_STATISTIC_INFO -> {
                     val st = com.seagull.boxcast.net.StatisticsInfo.decode(body.data)
                     Log.i(TAG, "HU statistics: cuid=${st.cuid} channel=${st.channel} " +
                         "carNumber=${st.carNumber} carType=${st.carType}")
                     onHuStatistics?.invoke(st)
                 }
                 // 设备信息/亮灭屏/前后台/索权
-                CmdId.MSG_CMD_HU_INFO -> onHuInfo?.invoke(DeviceInfo.decode(body.data))
-                CmdId.MSG_CMD_SCREEN_ON -> onScreenOn?.invoke()
-                CmdId.MSG_CMD_SCREEN_OFF -> onScreenOff?.invoke()
-                CmdId.MSG_CMD_SCREEN_USERPRESENT -> onScreenOn?.invoke()
-                CmdId.MSG_CMD_VEHICLE_FOREGROUND -> onVehicleForeground?.invoke()
-                CmdId.MSG_CMD_VEHICLE_BACKGROUND -> onVehicleBackground?.invoke()
-                CmdId.MSG_PERMISSION_LOCATION -> onPermissionRequest?.invoke("location")
-                CmdId.MSG_PERMISSION_READ_WRITE -> onPermissionRequest?.invoke("read_write")
-                CmdId.MSG_PERMISSION_RECORD -> onPermissionRequest?.invoke("record")
+                CarlifeFrame.CmdId.MSG_CMD_HU_INFO -> onHuInfo?.invoke(DeviceInfo.decode(body.data))
+                CarlifeFrame.CmdId.MSG_CMD_SCREEN_ON -> onScreenOn?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_SCREEN_OFF -> onScreenOff?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_SCREEN_USERPRESENT -> onScreenOn?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_VEHICLE_FOREGROUND -> onVehicleForeground?.invoke()
+                CarlifeFrame.CmdId.MSG_CMD_VEHICLE_BACKGROUND -> onVehicleBackground?.invoke()
+                CarlifeFrame.CmdId.MSG_PERMISSION_LOCATION -> onPermissionRequest?.invoke("location")
+                CarlifeFrame.CmdId.MSG_PERMISSION_READ_WRITE -> onPermissionRequest?.invoke("read_write")
+                CarlifeFrame.CmdId.MSG_PERMISSION_RECORD -> onPermissionRequest?.invoke("record")
             }
         }.onFailure { Log.w(TAG, "handle frame ${body.serviceType} fail: ${it.message}") }
     }
@@ -441,7 +440,7 @@ class BoxConnection(private val appContext: Context) {
     /** 102401 改帧宽高（sendWH2Box 复刻） */
     fun sendFrameWH(width: Int, height: Int) {
         // 原版走 VideoSettingFragment 的 sendWH2Box；消息体以 102401 定义为准
-        send(CmdId.BOX_CHANGE_FRAME_WH, com.seagull.boxcast.proto.Wire.Writer()
+        send(CarlifeFrame.CmdId.BOX_CHANGE_FRAME_WH, com.seagull.boxcast.proto.Wire.Writer()
             .int32(1, width).int32(2, height).toByteArray())
     }
 
@@ -475,17 +474,17 @@ class BoxConnection(private val appContext: Context) {
 
     /** 102402 视频心跳 */
     fun sendHeartbeat() {
-        send(CmdId.BOX_VIDEO_HEARTBEAT, ByteArray(0))
+        send(CarlifeFrame.CmdId.BOX_VIDEO_HEARTBEAT, ByteArray(0))
     }
 
     /** 102405 请求 H.264 列表 */
     fun requestH264List() {
-        send(CmdId.BOX_H264LIST_REQUEST, BoxH264List().encode())
+        send(CarlifeFrame.CmdId.BOX_H264LIST_REQUEST, BoxH264List().encode())
     }
 
     /** 102416 OTA 检查更新 */
     fun sendCheckUpdate(req: BoxCheckUpdate) {
-        send(CmdId.BOX_CHECK_UPDATE_REQ, req.encode())
+        send(CarlifeFrame.CmdId.BOX_CHECK_UPDATE_REQ, req.encode())
     }
 
     /** 盒子 OTA 地址（按当前 Hello.type 取） */

@@ -55,8 +55,9 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val mp = getSystemService(MediaProjectionManager::class.java)
-                .getMediaProjection(result.resultCode, result.data!!)
+            val mp: android.media.projection.MediaProjection? =
+                getSystemService(MediaProjectionManager::class.java)
+                    .getMediaProjection(result.resultCode, result.data!!)
             val intent = Intent(this, ScreenCastService::class.java).apply {
                 action = ScreenCastService.ACTION_START
                 putExtra(ScreenCastService.EXTRA_PROJECTION, mp)
@@ -86,7 +87,7 @@ class MainActivity : ComponentActivity() {
             inj.accessibilityProvider = { CastAccessibilityService.instance }
             // Window.injectInputEvent 通道：绑定本 Activity 为反控目标窗口（零权限）
             inj.windowInjector.activity = this@MainActivity
-            val dm = getSystemService(android.view.DisplayManager::class.java)
+            val dm = getSystemService(android.hardware.display.DisplayManager::class.java)
             dm.getDisplay(0)?.let { d ->
                 val m = android.util.DisplayMetrics()
                 d.getRealMetrics(m)
@@ -206,7 +207,7 @@ fun MainScreen(
                 fontSize = 11.sp)
             LazyColumn(Modifier.heightIn(max = 120.dp)) {
                 items(boxes) { b ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 2.dp), onClick = {
+                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), onClick = {
                         log("连接 ${b.host} ...")
                         connection.connect(b.host)
                     }) {

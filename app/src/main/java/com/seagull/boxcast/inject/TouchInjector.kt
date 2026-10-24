@@ -276,7 +276,7 @@ class TouchInjector(private val appContext: Context) {
         1 -> android.view.KeyEvent.KEYCODE_HOME
         5 -> android.view.KeyEvent.KEYCODE_CALL            // HFP 通话
         9 -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
-        11 -> android.view.KeyEvent.KEYCODE_NAVIGATION     // NAV→地图
+        11 -> android.view.KeyEvent.KEYCODE_ASSIST          // NAV→助手/地图
         13 -> android.view.KeyEvent.KEYCODE_MENU           // MODE
         14 -> android.view.KeyEvent.KEYCODE_BACK
         19 -> android.view.KeyEvent.KEYCODE_VOLUME_MUTE
