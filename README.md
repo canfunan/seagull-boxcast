@@ -55,6 +55,24 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第七轮深挖实证：车型渠道表 + AMIS 机制全量出土（63 项）
+
+**车型渠道表**（`CommonParams.VehicleChannel` enum 全量，格式 `2\d{7}` 8 位数字）：
+- 来源：CarLife 握手时车机自报（`getVechileChannel`：connected && hasRecvChannel → 协议值；断连用 SP 缓存）
+- 编码规律：前 4 位品牌段（2002 现代/2003 起亚/2004 奥迪/2005 上汽通用/2006 戴姆勒/2007 松下/2008 大众/2009 长安/2010 哈曼/2011 德尔菲/2012 华阳/2013 阿尔派/2014 先锋/2015 路畅/2016 飞歌/2017 伟世通/2018-2021 上汽通三品牌+比亚迪/2022 远峰+雪佛兰K216/2028 一汽丰田/2030 开悦/2031 吉利几何/2045 广汽丰田/2048 远峰ELH/2054 远峰伊利/2107 RAV4），后 4 位 x100=品牌默认 x1xx=车型 x2xx=双音频
+- 市场标记：20000000 后装 / 20000001 前装预装 / 20011100 普通
+- 已落地 `VehicleChannels.kt`（63 常量 + 中文名 + isValid）
+
+**AMIS 优化机制**（`AmisConfigManager`+`VideoResolution` 实证）：
+- JSON：`[{"cn":"20181100","rate":码率,"frame":帧率,"highrate":bool}]`，按 cn 匹配同时取码率+帧率
+- 特例：rate<=0 且 highrate=true → rate=1（高速通道标记）
+- 已落地 `VehicleProfile.kt`（内置实证默认 + 同格式 JSON 运行时覆盖）——**自建车型参数库即可复刻官方云端下发**
+
+**顺带挖出**：
+- `assets/car_brand.json`（1.28MB）——百度地图车型品牌库（选车 UI 数据源，version 哈希+头像 URL）
+- `assets/supplierconfig.json`——`{"supplier":{"vivo":{"appid":"100215079"}}}` vivo 定制版百度 appid
+- `assets/config.json`——**硬编码百度账号凭据**（bduss/clientId/accessToken/uuid，泄露）
+
 ## 第六轮深挖实证：官方参数优化体系（AmisConfigManager / VideoResolution / VideoMsgHandler）
 
 **码率/帧率——按车机型号云端下发**（`VideoResolution.getSpecialBitRate` 实证）：
