@@ -29,6 +29,7 @@ class ScreenCastService : Service() {
         const val EXTRA_HEIGHT = "height"
         const val EXTRA_BITRATE = "bitrate"
         const val EXTRA_FPS = "fps"
+        const val EXTRA_USE_STANDARD_VIDEO = "use_standard_video"
         private const val CHANNEL_ID = "boxcast"
         private const val NOTIFY_ID = 1
     }
@@ -84,8 +85,15 @@ class ScreenCastService : Service() {
                 // 音频通道（channel 3）：INIT + AudioRecord 采集推送（44100/2/16 实证默认）
                 audioSender = com.seagull.boxcast.audio.AudioChannel.Sender(conn).apply { init() }
                 startAudioCapture()
+                // 双视频路径：盒子点播（102409 裸帧，H264Sender）+
+                // 标准 CarLife 推流（131073 + 12B 头 on channel 2，VideoSender）。
+                // 用哪个由 extras 开关决定（实测校准后固定）
+                videoSender = VideoSender(conn)
+                val useStandard = intent.getBooleanExtra(EXTRA_USE_STANDARD_VIDEO, true)
+                videoSender?.sendEmptyForeground()
+
                 encoder = H264Encoder(mp, dm) { data, key, pts ->
-                    sender?.sendFrame(data, key, pts)
+                    if (useStandard) videoSender?.sendFrame(data) else sender?.sendFrame(data, key, pts)
                     // 本地环回：同时喂 PipBoard 远端流槽位（验证解码渲染管线；
                     // 盒子来流协议实测后改为 BoxConnection 分发喂入）
                     streamSource?.feedFrame(data, key)
@@ -107,6 +115,7 @@ class ScreenCastService : Service() {
     private var audioRecord: android.media.AudioRecord? = null
     private var audioThread: Thread? = null
     private var audioSender: com.seagull.boxcast.audio.AudioChannel.Sender? = null
+    private var videoSender: VideoSender? = null
 
     private fun startAudioCapture() {
         val sr = com.seagull.boxcast.audio.AudioChannel.DEFAULT_SAMPLE_RATE
@@ -140,6 +149,7 @@ class ScreenCastService : Service() {
 
     override fun onDestroy() {
         sender?.finish()
+        videoSender?.sendEmptyBackground()
         encoder?.stop()
         audioThread?.interrupt()
         audioSender?.stop()

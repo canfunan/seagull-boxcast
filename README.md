@@ -55,6 +55,27 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第九轮深挖实证：标准视频推流路径 + 前后台空包 + 双向暂停（Recorder）
+
+**标准视频流**（`Recorder.sendVideoData` + `ConnectManager.writeVideoData` 实证）：
+- `MSG_VIDEO_DATA=131073` 走 **channel 2**（VideoSocket 8240 / AOA channel 2）
+- **两段写**：`[12B 头][H.264]`——头与音频同款：`[dataLen:u32 BE][timeStamp:u32 BE(秒)][00 02 00 01]`
+- H.264 可经 AESManager 加密（`EncryptSetupManager.isEncryptProcessEnable`）
+
+**前后台空包**（`sendEmptyPacketForeground/Background` 实证）：dataLen=0，type=01 前台 / 02 后台——退后台发空包告知车机（非消息通道）
+
+**双向暂停仲裁**（Recorder 实证）：`pauseFromHeadUnit`/`resumeFromHeadUnit`（车机 MSG_CMD_VIDEO_ENCODER_PAUSE/START）
++ `pauseFromMobile`/`resumeFromMobile`（手机端）双标志，任一停即停推
+
+**画中画可投性结论**：官方 Recorder 也是 MediaProjection 截 display 0（与本工程一致）；
+海鸥 PipBoard 的 MirrorSlot/BoxStreamSource 画面经 SurfaceView 呈现在 display 0，
+MediaProjection 镜像 display 0 理论上可截到——**SurfaceView+MediaProjection 在部分 ROM
+有黑屏/不同步兼容坑，需真机验证；不稳则把槽位 SurfaceView 改 TextureView**。
+
+**本工程落地**：`video/VideoSender.kt`（标准路径：12B 头 + channel 2 + 前后台空包 + 双向暂停）；
+ScreenCastService 双视频路径开关（点播 102409 裸帧 / 标准 131073+头，extras `use_standard_video`，默认标准）；
+CmdId 补 MSG_VIDEO_DATA/MSG_VIDEO_HEARTBEAT。
+
 ## 第八轮深挖实证：音频通道全链路（PCMMediaManager/MediaChannelSend/PCMPackageHead）
 
 **通道分配**（端口表实证）：

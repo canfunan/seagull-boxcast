@@ -45,6 +45,10 @@ object CarlifeFrame {
         const val TOUCH_ACTION = 425985                 // CarlifeTouchAction
         const val TOUCH_CAR_HARD_KEY_CODE = 425992      // CarlifeCarHardKeyCode
 
+        // 标准视频流（Recorder.sendVideoData 实证：channel 2 + [12B 头][H.264] 两段）
+        const val MSG_VIDEO_DATA = 131073
+        const val MSG_VIDEO_HEARTBEAT = 131074
+
         // 音频段（CommonParams 实证；channel 3=媒体 4=TTS 5=VR）
         // 媒体音频 196xxx
         const val MSG_MEDIA_INIT = 196609
