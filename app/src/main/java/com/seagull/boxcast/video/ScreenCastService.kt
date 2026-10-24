@@ -195,7 +195,7 @@ class ScreenCastService : Service() {
                     recBuilder.javaClass
                         .getMethod("setAudioPlaybackCaptureConfiguration", cfgCls)
                         .invoke(recBuilder, captureConfig)
-                }.onFailure { Log.w(TAG, "setAudioPlaybackCaptureConfiguration reflect fail", it) }
+                }.onFailure { Log.w("ScreenCast", "setAudioPlaybackCaptureConfiguration reflect fail", it) }
                 val rec = recBuilder.build() as android.media.AudioRecord
                 audioRecord = rec
                 rec.startRecording()
