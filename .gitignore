@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+app/build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# 构建产物
+*.apk
+*.apk.1
+out/
+
+# 密钥
+*.jks
+*.keystore
+keystore.properties

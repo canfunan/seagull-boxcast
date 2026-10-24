@@ -1,0 +1,142 @@
+package com.seagull.boxcast.video
+
+import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.projection.MediaProjection
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Log
+import android.view.Surface
+import java.nio.ByteBuffer
+
+/**
+ * H.264 截屏编码器（MediaProjection → VirtualDisplay → MediaCodec）。
+ *
+ * 默认参数对齐逆向实证（2021 h/g.java + 2026 Configs）：
+ *   832x480 @ 15fps，3.2Mbps，video/avc，IDR 间隔 300ms
+ * 可通过 [reconfigure] 按盒子 Hello.isHuRate / 102401 协商结果动态调整。
+ */
+class H264Encoder(
+    private val mediaProjection: MediaProjection,
+    private val displayManager: DisplayManager,
+    private val onFrame: (ByteArray, isKeyFrame: Boolean, ptsUs: Long) -> Unit,
+) {
+    companion object {
+        private const val TAG = "H264Encoder"
+        const val DEFAULT_WIDTH = 832        // h/g.java: f374a = 832
+        const val DEFAULT_HEIGHT = 480       // h/g.java: b = 480
+        const val DEFAULT_FPS = 15           // h/g.java: c = 15
+        const val DEFAULT_BITRATE = 3_276_800 // h/g.java: d = 3276800
+        const val I_FRAME_INTERVAL_MS = 300  // 2026 FEATURE_CONFIG_I_FRAME_INTERVAL=300
+        const val MIME = "video/avc"         // t.smali: "video/avc"
+    }
+
+    private var codec: MediaCodec? = null
+    private var inputSurface: Surface? = null
+    private var virtualDisplay: VirtualDisplay? = null
+    private var encoderThread: HandlerThread? = null
+    private var encoderHandler: Handler? = null
+
+    @Volatile var running = false
+        private set
+
+    fun start(
+        width: Int = DEFAULT_WIDTH,
+        height: Int = DEFAULT_HEIGHT,
+        bitrate: Int = DEFAULT_BITRATE,
+        fps: Int = DEFAULT_FPS,
+    ) {
+        encoderThread = HandlerThread("H264Encoder").apply { start() }
+        encoderHandler = Handler(encoderThread!!.looper)
+
+        val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)   // 秒级；精确 IDR 间隔用 requestKeyFrame
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+        }
+
+        codec = MediaCodec.createEncoderByType(MIME).apply {
+            configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            inputSurface = createInputSurface()
+            setCallback(codecCallback, encoderHandler)
+            start()
+        }
+
+        // MediaProjection → VirtualDisplay("ScreenRecord") → 编码器 input surface
+        virtualDisplay = mediaProjection.createVirtualDisplay(
+            "BoxCast", width, height, 1,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            inputSurface, null, encoderHandler
+        )
+        running = true
+        currentFps = fps
+        Log.i(TAG, "encoder started ${width}x$height @${fps}fps ${bitrate}bps")
+    }
+
+    @Volatile var currentFps = DEFAULT_FPS
+        private set
+
+    private val codecCallback = object : MediaCodec.Callback() {
+        override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
+            // Surface 输入模式不需要
+        }
+
+        override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+            try {
+                if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                    codec.releaseOutputBuffer(index, false)
+                    return
+                }
+                val buf: ByteBuffer = codec.getOutputBuffer(index) ?: run {
+                    codec.releaseOutputBuffer(index, false); return
+                }
+                val out = ByteArray(info.size)
+                buf.position(info.offset)
+                buf.get(out, 0, info.size)
+                val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+                onFrame(out, key, info.presentationTimeUs)
+                codec.releaseOutputBuffer(index, false)
+            } catch (e: Exception) {
+                Log.e(TAG, "output buffer", e)
+            }
+        }
+
+        override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+            Log.e(TAG, "codec error", e)
+        }
+
+        override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+            Log.i(TAG, "format: $format")
+        }
+    }
+
+    /** 请求立即 IDR（SPS/PPS 重发，对应 ailink.idr_insert_sps 策略） */
+    fun requestKeyFrame() {
+        runCatching { codec?.setParameters(android.os.Bundle().apply {
+            putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+        }) }
+    }
+
+    /** 102401 改帧宽高（盒子侧协商） */
+    fun reconfigure(width: Int, height: Int) {
+        Log.i(TAG, "reconfigure -> ${width}x$height (TODO-CALIBRATE: 与盒子 102401 语义对齐)")
+        stop()
+        start(width, height)
+    }
+
+    fun stop() {
+        running = false
+        runCatching { virtualDisplay?.release() }
+        runCatching { codec?.stop() }
+        runCatching { codec?.release() }
+        runCatching { inputSurface?.release() }
+        runCatching { encoderThread?.quitSafely() }
+        virtualDisplay = null; codec = null; inputSurface = null
+        encoderThread = null; encoderHandler = null
+    }
+}
