@@ -230,11 +230,11 @@ class BoxConnection(private val appContext: Context) {
 
     // ---------- 发送 ----------
 
-    private fun send(serviceType: Int, payload: ByteArray) {
+    private fun send(serviceType: Int, payload: ByteArray, channel: Int = CarlifeFrame.Channel.CMD) {
         val body = if (USE_INNER_FRAME) {
             CarlifeFrame.inner(serviceType, payload)
         } else payload
-        val frame = CarlifeFrame.outer(CarlifeFrame.Channel.CMD, body)
+        val frame = CarlifeFrame.outer(channel, body)
         synchronized(this) { out?.write(frame); out?.flush() }
     }
 
@@ -245,8 +245,9 @@ class BoxConnection(private val appContext: Context) {
             .int32(1, width).int32(2, height).toByteArray())
     }
 
-    /** 公开发送：盒子命令（内层+外层封装，channel 1） */
-    fun sendRaw(serviceType: Int, payload: ByteArray) = send(serviceType, payload)
+    /** 公开发送：盒子命令（内层+外层封装，默认 channel 1） */
+    fun sendRaw(serviceType: Int, payload: ByteArray, channel: Int = CarlifeFrame.Channel.CMD) =
+        send(serviceType, payload, channel)
 
     /**
      * 两段式发送（对应 2021 d/o.java 的 [header][payload] 双段 bulkTransfer 写）：

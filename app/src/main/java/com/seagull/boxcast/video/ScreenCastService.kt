@@ -81,6 +81,9 @@ class ScreenCastService : Service() {
                 conn.onH264SendRequest = { req ->
                     sender?.sendH264Start(req.width, req.height, req.type, req.length.toInt(), req.frameType)
                 }
+                // 音频通道（channel 3）：INIT + AudioRecord 采集推送（44100/2/16 实证默认）
+                audioSender = com.seagull.boxcast.audio.AudioChannel.Sender(conn).apply { init() }
+                startAudioCapture()
                 encoder = H264Encoder(mp, dm) { data, key, pts ->
                     sender?.sendFrame(data, key, pts)
                     // 本地环回：同时喂 PipBoard 远端流槽位（验证解码渲染管线；
@@ -99,9 +102,48 @@ class ScreenCastService : Service() {
         return START_STICKY
     }
 
+    // ---------- 音频采集（AudioRecord → PCM 裸流 → channel 3） ----------
+
+    private var audioRecord: android.media.AudioRecord? = null
+    private var audioThread: Thread? = null
+    private var audioSender: com.seagull.boxcast.audio.AudioChannel.Sender? = null
+
+    private fun startAudioCapture() {
+        val sr = com.seagull.boxcast.audio.AudioChannel.DEFAULT_SAMPLE_RATE
+        val minBuf = android.media.AudioRecord.getMinBufferSize(
+            sr,
+            android.media.AudioFormat.CHANNEL_IN_STEREO,
+            android.media.AudioFormat.ENCODING_PCM_16BIT,
+        )
+        audioThread = Thread({
+            android.os.Process.setThreadPriority(-8)
+            runCatching {
+                val rec = android.media.AudioRecord(
+                    android.media.MediaRecorder.AudioSource.MIC,   // TODO-CALIBRATE: 音源按场景换（投屏内录用 REMOTE_SUBMIX 需特权）
+                    sr,
+                    android.media.AudioFormat.CHANNEL_IN_STEREO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT,
+                    minBuf * 2,
+                )
+                audioRecord = rec
+                rec.startRecording()
+                val buf = ByteArray(minBuf)
+                while (audioThread?.isInterrupted == false) {
+                    val n = rec.read(buf, 0, buf.size)
+                    if (n > 0) audioSender?.write(buf.copyOf(n))
+                }
+                rec.stop()
+                rec.release()
+            }
+        }, "AudioCapture").apply { start() }
+    }
+
     override fun onDestroy() {
         sender?.finish()
         encoder?.stop()
+        audioThread?.interrupt()
+        audioSender?.stop()
+        runCatching { audioRecord?.stop(); audioRecord?.release() }
         super.onDestroy()
     }
 

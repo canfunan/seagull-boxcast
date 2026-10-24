@@ -44,6 +44,27 @@ object CarlifeFrame {
         // 反控（标准 CarLife 协议段，2021 f/y.java 实证）
         const val TOUCH_ACTION = 425985                 // CarlifeTouchAction
         const val TOUCH_CAR_HARD_KEY_CODE = 425992      // CarlifeCarHardKeyCode
+
+        // 音频段（CommonParams 实证；channel 3=媒体 4=TTS 5=VR）
+        // 媒体音频 196xxx
+        const val MSG_MEDIA_INIT = 196609
+        const val MSG_MEDIA_STOP = 196610
+        const val MSG_MEDIA_PAUSE = 196611
+        const val MSG_MEDIA_RESUME_PLAY = 196612
+        const val MSG_MEDIA_SEEK_TO = 196613
+        const val MSG_MEDIA_DATA = 196614               // PCM 裸流
+        const val MSG_MEDIA_DATA_ENCODE = 196615        // AAC 编码流（AAC_SUPPORT）
+        // TTS 262xxx / VR 327xxx
+        const val MSG_NAV_TTS_INTERRUPT = 262149
+        const val MSG_NAV_TTS_FEED_END = 262150
+        const val MSG_VR_AUDIO_INIT = 327682
+        const val MSG_VR_AUDIO_DATA = 327683
+        const val MSG_VR_AUDIO_STOP = 327684
+        const val MSG_VR_AUDIO_FEED_END = 327688
+        // MIC 控制命令 65xxx（走 channel 1）
+        const val MSG_CMD_MIC_RECORD_WAKEUP_START = 65570
+        const val MSG_CMD_MIC_RECORD_END = 65571
+        const val MSG_CMD_MIC_RECORD_RECOG_START = 65572
     }
 
     const val MAX_FRAME = 67108864L   // 64MB（d/d.java 实证）

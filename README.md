@@ -55,6 +55,31 @@ CI：推 main 自动构建。
 | vivo 定制版 | com.baidu.carlife.vivo | **盒子协议全部实证**（耘电等盒子 Hello/认证/H264/OTA） |
 | CarLife+ v8.9.5 | com.baidu.carlife | **`Window.injectInputEvent` 零权限反控实证** |
 
+## 第八轮深挖实证：音频通道全链路（PCMMediaManager/MediaChannelSend/PCMPackageHead）
+
+**通道分配**（端口表实证）：
+- **channel 3 = 媒体音频**（MediaSocket 9240）——音乐/媒体
+- **channel 4 = TTS**（TTSSocket 9241）——导航语音
+- **channel 5 = VR**（VRSocket 9242）——语音识别
+- 控制命令（MSG_CMD_MIC_RECORD_*=65570/65571/65572）走 channel 1
+
+**PCM 裸流帧**（PCMPackageHead 实证）：`[dataLen:u32 BE][timeStamp:u32 BE][type:u32 BE][payload]`（12B 头）
+
+**消息族**（CommonParams 实证）：
+- 媒体 196xxx：INIT=196609 / STOP=196610 / PAUSE=196611 / RESUME=196612 / SEEK=196613 / **DATA=196614(PCM)** / **DATA_ENCODE=196615(AAC)**
+- TTS 262xxx：INTERRUPT=262149 / FEED_END=262150 / DONE=294919
+- VR 327xxx：INIT=327682 / DATA=327683 / STOP=327684 / FEED_END=327688 / DONE=360457
+- 包类型枚举 EMusicPackageType：INIT/STOP/PAUSE/RESUME/SEEK/NORMAL ↔ 上述消息
+
+**初始化握手**（sendInitParameter 实证）：
+- `CarlifeMusicInit{sampleRate, channelConfig, sampleFormat}`（proto 字段 1/2/3）
+- 默认 **44100Hz / 2 声道 / 16bit**（越界强制回退：<4000 或 >48000 → 44100；声道非 1/2 → 2；格式非 8/16 → 16）
+- INIT 包 = [12B PCM 头(type=196609)][MusicInit proto]；proto 可经 AESManager 加密（EncryptSetupManager 开关）
+
+**本工程落地**：`audio/AudioChannel.kt`（PcmHead 12B 构建 + MusicInit 编解码 + Sender 状态机 INIT→DATA→PAUSE/RESUME/SEEK/STOP）；
+ScreenCastService 投屏时同步采音频（AudioRecord 44100/2/16 → channel 3）；CmdId 补全音频消息族；sendRaw 支持指定 channel。
+TODO-CALIBRATE：投屏内录（REMOTE_SUBMIX 音源）需系统特权，普通应用只能采 MIC——车内场景建议后续换音源或走 AAC 模式。
+
 ## 第七轮深挖实证：车型渠道表 + AMIS 机制全量出土（63 项）
 
 **车型渠道表**（`CommonParams.VehicleChannel` enum 全量，格式 `2\d{7}` 8 位数字）：
