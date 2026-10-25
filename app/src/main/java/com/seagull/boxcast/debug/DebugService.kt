@@ -19,7 +19,7 @@ class DebugService : Service() {
 
     companion object {
         private const val CHANNEL = "boxcast_debug"
-        private const val NOTI_ID = 0xDBG
+        private const val NOTI_ID = 9999
     }
 
     override fun onCreate() {
