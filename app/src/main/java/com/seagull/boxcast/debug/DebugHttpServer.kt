@@ -160,7 +160,7 @@ class DebugHttpServer(private val port: Int = 9977) {
             }
         }
         return sb.append('"').toString()
-    }""
+    }
 }
 
 /**
@@ -236,7 +236,8 @@ object MockSelf {
             else log("❌ 没收到 H264——看 /log 找 BoxConnection/ScreenCast 日志")
             s.close()
         }.onFailure { log("mock 异常: ${it.message}") }
-        finally { runCatching { sock?.close() } }   // 异常路径也关 socket
+        // 异常路径也关 socket（Kotlin runCatching 无 finally 成员，用外层 try/finally）
+        runCatching { sock?.close() }
     }
 
     private fun md5hex(s: String): String =

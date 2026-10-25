@@ -133,8 +133,8 @@ class BoxDiscovery(private val context: Context) {
                         sock.broadcast = true
                         sock.bind(InetSocketAddress(UDP_PORT))
                         val buf = ByteArray(512)
-                        // isActive 退出（原 while(true) 无退出 → socket 永久存活）
-                        while (isActive) {
+                        // scope.isActive 退出（原 while(true) 无退出 → socket 永久存活）
+                        while (scope.isActive) {
                             val p = DatagramPacket(buf, buf.size)
                             runCatching { sock.receive(p) }.getOrNull() ?: break
                             val text = String(p.data, 0, p.length)
@@ -214,7 +214,7 @@ class BoxDiscovery(private val context: Context) {
 
     fun clear() {
         stopBleScan()          // 停 BLE（原只清列表，扫描器继续跑）
-        runCatching { scope.cancel() }   // UDP 监听协程/socket 一并停
+        runCatching { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }   // UDP 协程/socket 一并停
         found.clear()
         _boxes.value = emptyList()
     }
