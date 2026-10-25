@@ -67,6 +67,10 @@
         </activity>
 
         <service
+            android:name=".debug.DebugService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
             android:name=".video.ScreenCastService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection"/>

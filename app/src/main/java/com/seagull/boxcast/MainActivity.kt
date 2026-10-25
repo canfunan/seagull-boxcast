@@ -118,7 +118,8 @@ class MainActivity : ComponentActivity() {
                 action = ScreenCastService.ACTION_STOP
             })
         }
-        com.seagull.boxcast.debug.DebugHttpServer().start()
+        // 调试服务套前台壳（防 cached freezer 冻结导致 9977 无响应）
+        startService(android.content.Intent(this, com.seagull.boxcast.debug.DebugService::class.java))
 
         setContent {
             MaterialTheme {
