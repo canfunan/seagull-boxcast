@@ -32,8 +32,8 @@ class DebugHttpServer(private val port: Int = 9977) {
     companion object {
         private const val TAG = "DebugHttp"
 
-        /** 全局引用（MainActivity 注册，供 /cast/start 触发授权） */
-        @Volatile var castTrigger: (() -> Unit)? = null
+        /** /cast/start 触发：启动 ProxyActivity 拿授权（appContext，不依赖 Activity 生命周期） */
+        @Volatile var appContext: android.content.Context? = null
         @Volatile var stopTrigger: (() -> Unit)? = null
 
         /** 内存日志环（App 内 Log.i 双写，/log 也能读） */
@@ -106,7 +106,13 @@ class DebugHttpServer(private val port: Int = 9977) {
                 conn?.startServer(); "200" to """{"ok":true,"msg":"server started"}"""
             }
             path == "/cast/start" && method == "POST" -> {
-                castTrigger?.invoke(); "200" to """{"ok":true,"msg":"projection requested"}"""
+                val ctx = appContext
+                if (ctx != null) {
+                    val i = android.content.Intent(ctx, com.seagull.boxcast.debug.ProxyActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ctx.startActivity(i)
+                    "200" to """{"ok":true,"msg":"proxy activity started"}"""
+                } else "500" to """{"ok":false,"msg":"no context"}"""
             }
             path == "/cast/stop" && method == "POST" -> {
                 stopTrigger?.invoke(); "200" to """{"ok":true,"msg":"cast stopped"}"""
