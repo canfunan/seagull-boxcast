@@ -368,6 +368,7 @@ class BoxConnection(private val appContext: Context) {
                         send(CarlifeFrame.CmdId.BOX_H264_LIST, BoxH264List(
                             cnt = 1, h264Info = listOf(w0 to h0)).encode())
                     }
+                    Unit   // when 在 runCatching 尾部被当表达式：分支末值统一 Unit
                 }
                 // 盒→手 102411 全部完成（onH264AllDone）
                 CarlifeFrame.CmdId.BOX_H264_DONE -> {
