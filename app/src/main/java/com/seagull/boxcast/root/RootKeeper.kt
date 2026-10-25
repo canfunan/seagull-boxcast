@@ -37,6 +37,8 @@ object RootKeeper {
     private val KEEPALIVE_SCRIPT = """
 #!/system/bin/sh
 # BoxCast root 保活（App 自动部署，勿手改）
+# 卸载自杀（事故复盘：App 删了还拉 = 死亡循环）
+pm path $PKG > /dev/null 2>&1 || exit 0
 while true; do
   PID=${'$'}(pidof $PKG)
   if [ -z "${'$'}PID" ]; then
@@ -46,6 +48,7 @@ while true; do
   else
     echo -1000 > /proc/${'$'}PID/oom_score_adj 2>/dev/null
   fi
+  pm path $PKG > /dev/null 2>&1 || exit 0
   sleep 30
 done
 """.trimIndent()

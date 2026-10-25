@@ -99,11 +99,9 @@ class MainActivity : ComponentActivity() {
         Thread {
             com.seagull.boxcast.root.RootKeeper.setup(this)
             runOnUiThread {
+                // 事故复盘后去掉"启动即自动"：服务端模式/投屏授权都回到按钮触发
+                // （激进自动化 + 授权回调崩溃 + 保活拉起 = 死亡循环，不能再犯）
                 requestRuntimePermissions()
-                // 一键投屏：服务端模式自动起（真机日志实证盒子主动连），
-                // 随后自动弹 MediaProjection 授权——用户只需点一次"允许"
-                connection?.startServer()
-                requestProjection()
             }
         }.start()
         com.seagull.boxcast.root.RootKeeper.startInAppGuard()
