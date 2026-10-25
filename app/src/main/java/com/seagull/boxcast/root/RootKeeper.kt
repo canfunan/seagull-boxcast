@@ -140,8 +140,9 @@ done
         // Doze/待机白名单
         su("dumpsys deviceidle whitelist +$PKG") { }
         su("am set-standby-bucket $PKG active") { }
-        // MediaProjection 授权（root 下部分 ROM 可免弹窗；不支持的 ROM 忽略错误走正常弹窗）
-        su("appops set $PKG PROJECT_MEDIA allow") { }
+        // 注意：**不要** appops PROJECT_MEDIA allow——vivo 实证会跳过授权弹窗且
+        // onActivityResult 返回非 OK，按钮/HTTP 触发都“没弹窗也没反应”。
+        // MediaProjection 授权必须走系统弹窗（用户点一次，之后 Holder 缓存结果）。
         su("appops set $PKG START_FOREGROUND allow") { }
         Log.i(TAG, "特殊权限已配置")
         status.value = status.value.copy(dozeWhitelisted = true)
