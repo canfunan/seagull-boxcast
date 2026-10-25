@@ -170,11 +170,13 @@ class H264Encoder(
     private fun createVD(
         mp: android.media.projection.MediaProjection,
         w: Int, h: Int,
-        surface: android.view.Surface,
-        handler: android.os.Handler,
-    ): android.hardware.display.VirtualDisplay? =
-        mp.createVirtualDisplay("BoxCast", w, h, 1,
+        surface: android.view.Surface?,
+        handler: android.os.Handler?,
+    ): android.hardware.display.VirtualDisplay? {
+        if (surface == null || handler == null) return null
+        return mp.createVirtualDisplay("BoxCast", w, h, 1,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, handler)
+    }
 
     /** 复用 VD 时参数对齐（分辨率没变就不动） */
     private fun resizeIfNeeded(w: Int, h: Int) { /* no-op：同参数无需 resize */ }

@@ -101,17 +101,9 @@ class ScreenCastService : Service() {
                 } else {
                     Log.i("ScreenCast", "复用缓存 projection（免弹窗）")
                 }
-                    // Android 14+（API 34）新规：MediaProjection 必须先 registerCallback
-                    // 才能 createVirtualDisplay，否则 IllegalStateException
-                    projection.registerCallback(object : android.media.projection.MediaProjection.Callback() {
-                        override fun onStop() {
-                            Log.i("ScreenCast", "MediaProjection onStop（用户/系统收回）→ 停投")
-                            runCatching { encoder?.stop() }
-                            stopSelf()
-                        }
-                    }, android.os.Handler(android.os.Looper.getMainLooper()))
-                    projection
-                }.getOrNull()
+                if (mp == null) {
+                    stopSelf(); return START_NOT_STICKY
+                }
                 if (mp == null) {
                     stopSelf(); return START_NOT_STICKY
                 }
