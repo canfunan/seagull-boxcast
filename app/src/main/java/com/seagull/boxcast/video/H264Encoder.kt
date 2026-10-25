@@ -71,12 +71,27 @@ class H264Encoder(
             start()
         }
 
-        // MediaProjection → VirtualDisplay("ScreenRecord") → 编码器 input surface
-        virtualDisplay = mediaProjection.createVirtualDisplay(
-            "BoxCast", width, height, 1,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            inputSurface, null, encoderHandler
-        )
+        // MediaProjection → VirtualDisplay("BoxCast") → 编码器 input surface。
+        // Android 13+：同一 projection 实例只能 createVirtualDisplay 一次
+        // （SecurityException: Don't take multiple captures on the same instance）
+        // → VD 缓存复用（免重复授权的另一半）；缓存失效才新建
+        val cached = com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay
+        virtualDisplay = if (cached != null && cached.display != null) {
+            Log.i(TAG, "复用缓存 VirtualDisplay（免重新 capture）")
+            // 复用 VD：需把编码器 surface 挂上去——VD 的 surface 不能热换，
+            // 因此复用时必须同参数（宽度/高度变化仍走重建路径）
+            if (cached.display.width == width && cached.display.height == height) {
+                resizeIfNeeded(width, height)
+                cached
+            } else {
+                com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay = null
+                cached.release()
+                createVD(mediaProjection, width, height, inputSurface, encoderHandler)
+            }
+        } else {
+            createVD(mediaProjection, width, height, inputSurface, encoderHandler)
+        }
+        com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay = virtualDisplay
         running = true
         currentFps = fps
         currentWidth = width
@@ -151,6 +166,18 @@ class H264Encoder(
         stop()
         start(width, height, bitrate, fps)
     }
+
+    private fun createVD(
+        mp: android.media.projection.MediaProjection,
+        w: Int, h: Int,
+        surface: android.view.Surface,
+        handler: android.os.Handler,
+    ): android.hardware.display.VirtualDisplay? =
+        mp.createVirtualDisplay("BoxCast", w, h, 1,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, handler)
+
+    /** 复用 VD 时参数对齐（分辨率没变就不动） */
+    private fun resizeIfNeeded(w: Int, h: Int) { /* no-op：同参数无需 resize */ }
 
     fun stop() {
         running = false

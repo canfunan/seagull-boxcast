@@ -74,15 +74,33 @@ class ScreenCastService : Service() {
                     startForeground(NOTIFY_ID, notif)
                 }
                 // FGS 已起，此刻 getMediaProjection 才合法
-                // token 一次性：Android 禁止同一 resultData 重复 getMediaProjection
-                // （SecurityException: Don't re-use the resultData）——用完立即焚
-                val rCode = BoxConnectionHolder.projectionResultCode
-                val rData = BoxConnectionHolder.projectionData
-                BoxConnectionHolder.projectionData = null
-                val mp = runCatching {
-                    val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
-                    val projection = mpm.getMediaProjection(rCode,
-                        rData ?: error("projection data null"))
+                // 免重复授权：优先复用上次的 projection 实例（原版实证机制）。
+                // 没有才走授权结果（token 一次性，用完立即焚）
+                var mp = BoxConnectionHolder.projection
+                if (mp == null) {
+                    val rCode = BoxConnectionHolder.projectionResultCode
+                    val rData = BoxConnectionHolder.projectionData
+                    BoxConnectionHolder.projectionData = null
+                    mp = runCatching {
+                        val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                        val projection = mpm.getMediaProjection(rCode,
+                            rData ?: error("projection data null"))
+                        projection.registerCallback(object : android.media.projection.MediaProjection.Callback() {
+                            override fun onStop() {
+                                Log.i("ScreenCast", "MediaProjection onStop（用户/系统收回）→ 清缓存停投")
+                                BoxConnectionHolder.projection = null
+                                BoxConnectionHolder.virtualDisplay = null
+                                runCatching { encoder?.stop() }
+                                stopSelf()
+                            }
+                        }, android.os.Handler(android.os.Looper.getMainLooper()))
+                        projection
+                    }.getOrNull()
+                    BoxConnectionHolder.projection = mp
+                    Log.i("ScreenCast", "新授权 projection: ${mp != null}")
+                } else {
+                    Log.i("ScreenCast", "复用缓存 projection（免弹窗）")
+                }
                     // Android 14+（API 34）新规：MediaProjection 必须先 registerCallback
                     // 才能 createVirtualDisplay，否则 IllegalStateException
                     projection.registerCallback(object : android.media.projection.MediaProjection.Callback() {
@@ -308,4 +326,13 @@ object BoxConnectionHolder {
      */
     var projectionResultCode: Int = 0
     var projectionData: android.content.Intent? = null
+
+    /**
+     * MediaProjection + VirtualDisplay 实例缓存（原版实证的免重复授权机制）：
+     * Android 对同包有授权记忆——projection 实例活着时再次投屏系统不弹窗。
+     * 原版 AppRecorder.mMediaProjection 常驻不 stop；我们同样缓存，
+     * Service onDestroy 只停编码器不 stop projection/VD，重复投屏零弹窗。
+     */
+    var projection: android.media.projection.MediaProjection? = null
+    var virtualDisplay: android.hardware.display.VirtualDisplay? = null
 }
