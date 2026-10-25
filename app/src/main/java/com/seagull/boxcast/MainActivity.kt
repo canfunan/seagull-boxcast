@@ -53,11 +53,10 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val mp: android.media.projection.MediaProjection? =
-                getSystemService(MediaProjectionManager::class.java)
-                    .getMediaProjection(result.resultCode, result.data!!)
-            // MediaProjection 非 Parcelable → 同进程全局持有（BoxConnectionHolder）
-            BoxConnectionHolder.projection = mp
+            // Android 14+：此处不能 getMediaProjection（FGS 未起 → SecurityException）。
+            // 只存授权结果；Service 内 startForeground(MEDIA_PROJECTION) 后再取
+            BoxConnectionHolder.projectionResultCode = result.resultCode
+            BoxConnectionHolder.projectionData = result.data
             val intent = Intent(this, ScreenCastService::class.java).apply {
                 action = ScreenCastService.ACTION_START
                 putExtra(ScreenCastService.EXTRA_WIDTH, encWidth)
