@@ -273,7 +273,9 @@ class BoxConnection(private val appContext: Context) {
         writeQueue.clear()
         writeThread = Thread({
             android.os.Process.setThreadPriority(10)   // 原版 setPriority(10)
-            val bos = BufferedOutputStream(out, SEND_BUFFER_SIZE)
+            // **bos 可空**：服务端模式没有客户端 socket（out=null）——
+            // 原 BufferedOutputStream(out) NPE → 未捕获异常杀整个进程（server/start 即崩）
+            val bos = out?.let { BufferedOutputStream(it, SEND_BUFFER_SIZE) }
             // poll(超时) 而非 take()：close() 置 false + interrupt 后最多 200ms 退出
             // （take() 吞 InterruptedException 且清中断标志 → 线程永久阻塞泄漏）
             while (writeActive) {
@@ -282,7 +284,7 @@ class BoxConnection(private val appContext: Context) {
                 val (ch, frame) = item
                 runCatching {
                     // 服务端模式：按 channel 路由到对应 socket；客户端模式：bos
-                    val target = channelOut(ch) ?: if (serverSockets.isNotEmpty()) return@runCatching else bos
+                    val target = channelOut(ch) ?: if (serverSockets.isNotEmpty()) return@runCatching else bos ?: return@runCatching
                     target.write(frame)
                     target.flush()
                 }.onFailure {
@@ -292,7 +294,11 @@ class BoxConnection(private val appContext: Context) {
                 }
             }
             Log.i(TAG, "write thread exit")
-        }, "BoxWrite").apply { start() }
+        }, "BoxWrite").apply {
+            // 兜底：写线程任何未捕获异常不再杀进程（Android 默认 handler 会杀）
+            setUncaughtExceptionHandler { _, e -> Log.e(TAG, "write thread crash", e) }
+            start()
+        }
     }
 
     /** 组帧入队。视频/音频大数据帧可弃（拥塞时丢帧保连接），控制帧（ch1/ch6）满才断 */

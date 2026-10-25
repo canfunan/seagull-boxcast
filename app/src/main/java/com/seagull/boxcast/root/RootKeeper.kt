@@ -45,6 +45,10 @@ object RootKeeper {
 # BoxCast root 保活（App 自动部署，勿手改）
 # 卸载自杀（事故复盘：App 删了还拉 = 死亡循环）
 pm path $PKG > /dev/null 2>&1 || exit 0
+# 单例锁：已有一个守护在跑就退出（原每次 App 启动都 nohup 一个 → 进程累积）
+mkdir -p /data/local/tmp 2>/dev/null
+exec 9>/data/local/tmp/seagull-boxcast-keepalive.lock
+flock -n 9 || exit 0
 while true; do
   PID=${'$'}(pidof $PKG)
   if [ -z "${'$'}PID" ]; then
@@ -158,7 +162,7 @@ done
         su("cat > $script <<'SEAGULL_EOF'\n$KEEPALIVE_SCRIPT\nSEAGULL_EOF") { }
         su("chmod 755 $script") { }
         su("ls -la $script") { out -> Log.i(TAG, "保活脚本: $out") }
-        // 立即跑一次部署验证（不等重启）
+        // 立即起一个守护（flock 单例保证不累积；不等重启）
         su("nohup sh $script > /dev/null 2>&1 &") { }
     }
 
