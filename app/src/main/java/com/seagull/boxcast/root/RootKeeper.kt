@@ -20,6 +20,11 @@ object RootKeeper {
     private const val TAG = "RootKeeper"
     private const val PKG = "com.seagull.boxcast"
 
+    /** su 全路径（App 进程 PATH 不含 /system/bin，ProcessBuilder("su") 报 No such file） */
+    private val SU_PATH = if (java.io.File("/system/bin/su").exists()) "/system/bin/su"
+                          else if (java.io.File("/system/xbin/su").exists()) "/system/xbin/su"
+                          else "su"
+
     /** root 能力状态（UI 展示用） */
     data class Status(
         val suAvailable: Boolean = false,
@@ -82,12 +87,12 @@ done
     }
 
     private fun suOut(cmd: String): String = runCatching {
-        val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
+        val p = ProcessBuilder(SU_PATH, "-c", cmd).redirectErrorStream(true).start()
         p.inputStream.bufferedReader().readText().trim().also { p.waitFor() }
     }.getOrDefault("")
 
     fun hasSu(): Boolean = runCatching {
-        val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+        val p = ProcessBuilder(SU_PATH, "-c", "id").redirectErrorStream(true).start()
         p.waitFor() == 0
     }.getOrDefault(false)
 
@@ -176,7 +181,7 @@ done
     // ---- su 执行封装 ----
     private fun su(cmd: String, onOut: (String) -> Unit) {
         runCatching {
-            val p = ProcessBuilder("su", "-c", cmd).redirectErrorStream(true).start()
+            val p = ProcessBuilder(SU_PATH, "-c", cmd).redirectErrorStream(true).start()
             val out = p.inputStream.bufferedReader().readText().trim()
             p.waitFor()
             onOut(out)
