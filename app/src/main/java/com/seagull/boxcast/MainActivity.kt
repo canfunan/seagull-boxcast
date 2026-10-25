@@ -108,9 +108,13 @@ class MainActivity : ComponentActivity() {
 
         // 内置 HTTP 调试接口（127.0.0.1:9977）：/log /status /server/start /cast/start /mock
         com.seagull.boxcast.debug.DebugHttpServer.castTrigger = {
-            runOnUiThread {
-                val mpm = getSystemService(MediaProjectionManager::class.java)
-                projectionLauncher.launch(mpm.createScreenCaptureIntent())
+            runCatching {
+                runOnUiThread {
+                    runCatching {
+                        val mpm = getSystemService(MediaProjectionManager::class.java)
+                        projectionLauncher.launch(mpm.createScreenCaptureIntent())
+                    }
+                }
             }
         }
         com.seagull.boxcast.debug.DebugHttpServer.stopTrigger = {
@@ -176,6 +180,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         discovery.clear()
         connection?.destroy()   // 停止自动重连 + 释放协程（否则 Activity 退了还在重连）
+        com.seagull.boxcast.debug.DebugHttpServer.castTrigger = null   // 防持旧 launcher 崩
     }
 }
 

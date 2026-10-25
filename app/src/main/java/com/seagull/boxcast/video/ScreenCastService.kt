@@ -74,10 +74,15 @@ class ScreenCastService : Service() {
                     startForeground(NOTIFY_ID, notif)
                 }
                 // FGS 已起，此刻 getMediaProjection 才合法
+                // token 一次性：Android 禁止同一 resultData 重复 getMediaProjection
+                // （SecurityException: Don't re-use the resultData）——用完立即焚
+                val rCode = BoxConnectionHolder.projectionResultCode
+                val rData = BoxConnectionHolder.projectionData
+                BoxConnectionHolder.projectionData = null
                 val mp = runCatching {
                     val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
-                    val projection = mpm.getMediaProjection(BoxConnectionHolder.projectionResultCode,
-                        BoxConnectionHolder.projectionData ?: error("projection data null"))
+                    val projection = mpm.getMediaProjection(rCode,
+                        rData ?: error("projection data null"))
                     // Android 14+（API 34）新规：MediaProjection 必须先 registerCallback
                     // 才能 createVirtualDisplay，否则 IllegalStateException
                     projection.registerCallback(object : android.media.projection.MediaProjection.Callback() {
