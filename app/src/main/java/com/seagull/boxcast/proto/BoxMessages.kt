@@ -79,8 +79,9 @@ data class BoxVehicleState(val connectState: Int = 0) {   // 1
  * （rsCode/rsId 呼应 BoxConstants.BOX_RS_CODE=3 / BOX_RS_ID=2）
  */
 data class BoxH264List(
-    val cnt: Int = 0,             // 1  .proto 权威
-    val timeStamp: Long = 0,      // 2
+    val cnt: Int = 0,             // 1  .proto 权威 required int32
+    val timeStamp: Long = 0,      // 2  optional int64
+    val h264Info: List<Pair<Int, Int>> = emptyList(),  // 3  repeated CarlifeBoxH264Info{width,height}
     val rsId: Int = 2,            // 4  rs_id
     val rsCode: Int = 3,          // 5  rs_code（BoxConstants.BOX_RS_CODE=3）
     val rsType: Int = 0,          // 6  rs_type
@@ -89,6 +90,9 @@ data class BoxH264List(
     fun encode(): ByteArray = Wire.Writer().apply {
         int32(1, cnt)
         int64(2, timeStamp)
+        h264Info.forEach { (w, h) ->                     // 3  repeated：每条 [1=w][2=h]
+            bytes(3, Wire.Writer().int32(1, w).int32(2, h).toByteArray())
+        }
         int32(4, rsId)
         int32(5, rsCode)
         int32(6, rsType)
@@ -98,11 +102,25 @@ data class BoxH264List(
     companion object {
         fun decode(d: ByteArray): BoxH264List = Wire.Reader(d).run {
             var m = BoxH264List()
+            val infos = mutableListOf<Pair<Int, Int>>()
             while (!atEnd()) {
                 val (f, w) = readTag()
                 when (f) {
                     1 -> m = m.copy(cnt = readInt32())
                     2 -> m = m.copy(timeStamp = readInt64())
+                    3 -> {                                          // repeated h264Info
+                        val sub = Wire.Reader(readBytes())
+                        var iw = 0; var ih = 0
+                        while (!sub.atEnd()) {
+                            val (sf, sw) = sub.readTag()
+                            when (sf) {
+                                1 -> iw = sub.readInt32()
+                                2 -> ih = sub.readInt32()
+                                else -> sub.skip(sw)
+                            }
+                        }
+                        infos.add(iw to ih)
+                    }
                     4 -> m = m.copy(rsId = readInt32())
                     5 -> m = m.copy(rsCode = readInt32())
                     6 -> m = m.copy(rsType = readInt32())
@@ -110,7 +128,7 @@ data class BoxH264List(
                     else -> skip(w)
                 }
             }
-            m
+            m.copy(h264Info = infos)
         }
     }
 }
@@ -125,7 +143,7 @@ data class BoxH264Init(
     val supportPFrames: Boolean = true,    // 3
 ) {
     fun encode(): ByteArray = Wire.Writer().apply {
-        int32(1, timeStamp.toInt())
+        int64(1, timeStamp)          // proto 权威 optional int64 timeStamp = 1（原 int32 截断高位）
         string(2, verifyValue)
         bool(3, supportPFrames)
     }.toByteArray()

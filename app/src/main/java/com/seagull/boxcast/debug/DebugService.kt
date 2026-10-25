@@ -40,7 +40,7 @@ class DebugService : Service() {
         } else {
             startForeground(NOTI_ID, n)
         }
-        DebugHttpServer().start()
+        DebugHttpServer.instance?.start() ?: DebugHttpServer().also { DebugHttpServer.instance = it }.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -48,6 +48,7 @@ class DebugService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        runCatching { DebugHttpServer.instance?.stop() }
         super.onDestroy()
     }
 }

@@ -71,11 +71,16 @@ object Wire {
         fun readVarint(): Long {
             var result = 0L
             var shift = 0
+            var count = 0
             while (true) {
+                if (pos >= data.size || count >= 10) {
+                    throw IllegalArgumentException("bad varint: pos=$pos size=${data.size}")
+                }
                 val b = data[pos++].toInt() and 0xFF
                 result = result or ((b and 0x7F).toLong() shl shift)
                 if (b and 0x80 == 0) break
                 shift += 7
+                count++
             }
             return result
         }
@@ -87,7 +92,10 @@ object Wire {
 
         fun readBytes(): ByteArray {
             val len = readVarint().toInt()
-            val b = data.copyOfRange(pos, pos + len)
+            if (len < 0 || pos + len > data.size) {
+                throw IllegalArgumentException("bad len: $len (pos=$pos size=${data.size})")
+            }
+            val b = if (len == 0) ByteArray(0) else data.copyOfRange(pos, pos + len)
             pos += len
             return b
         }
@@ -100,9 +108,11 @@ object Wire {
         fun skip(wire: Int) {
             when (wire) {
                 WIRE_VARINT -> readVarint()
-                WIRE_FIXED64 -> pos += 8
-                WIRE_LEN -> { val n = readVarint().toInt(); pos += n }
-                WIRE_FIXED32 -> pos += 4
+                WIRE_FIXED64 -> { if (pos + 8 > data.size) throw IllegalArgumentException("skip64"); pos += 8 }
+                WIRE_LEN -> { val n = readVarint().toInt(); if (n < 0 || pos + n > data.size) throw IllegalArgumentException("skipLen: $n"); pos += n }
+                WIRE_FIXED32 -> { if (pos + 4 > data.size) throw IllegalArgumentException("skip32"); pos += 4 }
+                // wire 3/4/6/7（group/deprecated）：**必须推进 pos**，否则 decode while(!atEnd()) 死循环
+                else -> { if (pos >= data.size) throw IllegalArgumentException("skipUnknown"); pos += 1 }
             }
         }
     }

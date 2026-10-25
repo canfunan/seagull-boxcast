@@ -86,15 +86,21 @@ class EncryptHandshake(private val conn: BoxConnection) {
         seed = ""
     }
 
-    /** 发送前加密（对接 BoxConnection.send；AES/ECB/NoPadding 对齐 BoxCrypto） */
+    /**
+     * 发送前加密（AES/ECB/NoPadding 对齐 BoxCrypto）。
+     * **非 16 倍数不再静默回落明文**（安全降级）：加密启用后 payload 非 16 倍数
+     * 说明协议/密钥有偏差——发明文对端必然解失败且无提示，改为抛错由上层断链重协商。
+     */
     fun encryptIfEnabled(data: ByteArray): ByteArray {
         if (!enabled || data.isEmpty()) return data
-        return BoxCrypto.encryptWithKey(seed.toByteArray(Charsets.UTF_8), data) ?: data
+        return BoxCrypto.encryptWithKey(seed.toByteArray(Charsets.UTF_8), data)
+            ?: throw IllegalStateException("encrypt fail (payload not 16B-aligned? size=${data.size})")
     }
 
-    /** 接收后解密 */
+    /** 接收后解密（同上：失败抛错，不静默回落） */
     fun decryptIfEnabled(data: ByteArray): ByteArray {
         if (!enabled || data.isEmpty()) return data
-        return BoxCrypto.decryptWithKey(seed.toByteArray(Charsets.UTF_8), data) ?: data
+        return BoxCrypto.decryptWithKey(seed.toByteArray(Charsets.UTF_8), data)
+            ?: throw IllegalStateException("decrypt fail (payload not 16B-aligned? size=${data.size})")
     }
 }

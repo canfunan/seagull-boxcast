@@ -99,6 +99,9 @@ class MainActivity : ComponentActivity() {
         Thread {
             com.seagull.boxcast.root.RootKeeper.setup(this)
             runOnUiThread {
+                // su 授权等待可能数十秒：期间用户退出 → launcher 已随 DESTROYED 注销，
+                // 此刻 launch 会 IllegalStateException。判活再请求。
+                if (isDestroyed) return@runOnUiThread
                 // 事故复盘后去掉"启动即自动"：服务端模式/投屏授权都回到按钮触发
                 // （激进自动化 + 授权回调崩溃 + 保活拉起 = 死亡循环，不能再犯）
                 requestRuntimePermissions()
@@ -169,7 +172,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        discovery.clear()
+        discovery?.clear()
+        // 反控：解 Activity 强引用 + 释放常驻 su shell（原全工程无人调 release → 泄漏）
+        injector?.let { inj ->
+            inj.windowInjector?.activity = null
+            runCatching { inj.release() }
+        }
+        com.seagull.boxcast.inject.InjectorRegistry.injector = null
+        // 调试触发器置空（静态 lambda 持 Activity + 后台 startService 崩）
+        com.seagull.boxcast.debug.DebugHttpServer.stopTrigger = null
         connection?.destroy()   // 停止自动重连 + 释放协程（否则 Activity 退了还在重连）
     }
 }

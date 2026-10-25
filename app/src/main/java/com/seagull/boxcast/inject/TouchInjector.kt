@@ -166,11 +166,16 @@ class TouchInjector(private val appContext: Context) {
         when (mode) {
             Mode.REFLECT -> injectKeyReflect(androidKey)
             Mode.WINDOW_API -> {
-                val now = SystemClock.uptimeMillis()
-                windowInjector.injectKey(
-                    android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_DOWN, androidKey, 0))
-                windowInjector.injectKey(
-                    android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_UP, androidKey, 0))
+                // 与触摸路径一致包 runOnUiThread：ViewRootImpl 非线程安全，
+                // 从 BoxConnection 读循环 IO 线程直调可能 native 崩
+                val act = windowInjector.activity ?: run { downgrade(); return }
+                act.runOnUiThread {
+                    val now = SystemClock.uptimeMillis()
+                    windowInjector.injectKey(
+                        android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_DOWN, androidKey, 0))
+                    windowInjector.injectKey(
+                        android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_UP, androidKey, 0))
+                }
             }
             Mode.ROOT_SHELL -> rootCmd("input keyevent $androidKey")
             Mode.ACCESSIBILITY -> globalAction(mapCarKeyGlobal(keycode))
@@ -306,7 +311,27 @@ class TouchInjector(private val appContext: Context) {
             Mode.ROOT_SHELL -> mode = Mode.ACCESSIBILITY
             else -> {}
         }
+        // 降级到 ROOT_SHELL 时**必须确保 root 通道已初始化**——
+        // init() 在 windowInjector.ensureReady() 成功时提前 return，rootAvailable lazy
+        // 从未求值 → suOut==null → rootCmd 静默 no-op（反控彻底死掉无日志）。
+        if (mode == Mode.ROOT_SHELL && suOut == null) {
+            if (!initRootShell()) {
+                Log.w(TAG, "root shell init fail, downgrade to ACCESSIBILITY")
+                mode = Mode.ACCESSIBILITY
+            } else {
+                Log.i(TAG, "root shell channel initialized on downgrade")
+            }
+        }
     }
+
+    /** 初始化 root shell 通道（downgrade 路径强制调用；init 提前 return 时补初始化） */
+    private fun initRootShell(): Boolean = runCatching {
+        if (suOut != null) return true
+        val p = ProcessBuilder("su", "-c", "sh").redirectErrorStream(true).start()
+        suProcess = p
+        suOut = java.io.DataOutputStream(p.outputStream)
+        true
+    }.getOrElse { false }
 
     /** 无障碍服务是否已在系统设置中启用 */
     fun isAccessibilityEnabled(serviceClass: Class<*>): Boolean = runCatching {

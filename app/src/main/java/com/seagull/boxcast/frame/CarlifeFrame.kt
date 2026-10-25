@@ -80,7 +80,7 @@ object CarlifeFrame {
         // 车机 HUD 增强（std 权威 ID）
         const val MSG_CMD_MEDIA_INFO = 65589      // 当前歌曲（MediaSession 读取）
         const val MSG_CMD_MODULE_STATUS = 65574   // 模块状态
-        const val MSG_CMD_TIME_SYNC = 65566       // 时间同步（TODO-CALIBRATE: std 值待验）
+        const val MSG_CMD_TIME_SYNC = 65632       // 时间同步（CommonParams.java:298 权威）
 
         // HU 索权（CarlifeConnectHsgHandler 实证）
         const val MSG_PERMISSION_READ_WRITE = 65579
@@ -121,19 +121,34 @@ object CarlifeFrame {
         return h + payload
     }
 
-    /** 组内层 CarlifeCmdMessage：[dataLen:u16 BE][reserved:u16 BE][serviceType:u32 BE][payload] */
-    fun inner(serviceType: Int, payload: ByteArray): ByteArray {
-        require(payload.size <= 0xFFFF) { "cmd message too large: ${payload.size}" }
-        val h = ByteArray(8)
-        putU16BE(h, 0, payload.size)
-        putU16BE(h, 2, 0)            // reserved，恒 0
-        putU32BE(h, 4, serviceType.toLong())
+    /**
+     * 组内层 CarlifeCmdMessage——**双格式**（CarlifeCmdMessage.toByteArray 权威）：
+     *  channel 1/6 → 8B 头：[len:u16 BE][reserved:u16 BE][serviceType:u32 BE@4]
+     *  channel 2-5 → 12B 头：[len:u32 BE][_:u32 BE@4][serviceType:u32 BE@8]
+     */
+    fun inner(serviceType: Int, payload: ByteArray, channel: Int = Channel.CMD): ByteArray {
+        if (channel == Channel.CMD || channel == Channel.TOUCH) {
+            require(payload.size <= 0xFFFF) { "cmd message too large: ${payload.size}" }
+            val h = ByteArray(8)
+            putU16BE(h, 0, payload.size)
+            putU16BE(h, 2, 0)            // reserved，恒 0
+            putU32BE(h, 4, serviceType.toLong())
+            return h + payload
+        }
+        require(payload.size <= 0x7FFFFFFF) { "cmd message too large: ${payload.size}" }
+        val h = ByteArray(12)
+        putU32BE(h, 0, payload.size.toLong())
+        putU32BE(h, 4, 0)              // timestamp/保留（权威 toByteArray 写 0）
+        putU32BE(h, 8, serviceType.toLong())
         return h + payload
     }
 
     /** 一条盒子命令：内层套外层，走 channel 1 */
     fun boxCmd(serviceType: Int, payload: ByteArray, channel: Int = Channel.CMD): ByteArray =
-        outer(channel, inner(serviceType, payload))
+        outer(channel, inner(serviceType, payload, channel))
+
+    /** 数据通道（2-5）裸发送路径：权威 ConnectSocket.writeData/AoaWriteTransport 实证
+     *  ——视频/音频只发 [12B PCM/视频头][data]，**不套** CarlifeCmdMessage 内层头 */
 
     fun putU16BE(b: ByteArray, off: Int, v: Int) {
         b[off] = (v ushr 8).toByte()
@@ -174,7 +189,9 @@ class FrameReader {
         }
         val channel = CarlifeFrame.u32BE(header, 0).toInt()
         val len = CarlifeFrame.u32BE(header, 4)
-        require(len in 1..CarlifeFrame.MAX_FRAME) { "bad frame len: $len" }
+        // 权威 AoaReadTransport.java:57-61：channel∈[1,6] && 0≤size≤67108864（0 合法）
+        require(channel in 1..6) { "bad channel: $channel" }
+        require(len in 0..CarlifeFrame.MAX_FRAME) { "bad frame len: $len" }
         val payload = ByteArray(len.toInt())
         var filled = 0
         while (filled < payload.size) {
@@ -198,11 +215,23 @@ data class CmdMessage(val serviceType: Int, val data: ByteArray) {
     override fun hashCode(): Int = 31 * serviceType + data.contentHashCode()
 }
 
-/** 解析内层 CarlifeCmdMessage（外层 payload 解出来后调用） */
-fun parseInner(payload: ByteArray): CmdMessage? {
-    if (payload.size < 8) return null
-    val dataLen = CarlifeFrame.u16BE(payload, 0)
-    val serviceType = CarlifeFrame.u32BE(payload, 4).toInt()
-    val data = payload.copyOfRange(8, 8 + dataLen)
+/**
+ * 解析内层 CarlifeCmdMessage（双格式，CarlifeCmdMessage.fromByteArray 权威）。
+ * @param channel 外层帧的 channel（决定 8B/12B 头）
+ */
+fun parseInner(payload: ByteArray, channel: Int): CmdMessage? {
+    if (channel == CarlifeFrame.Channel.CMD || channel == CarlifeFrame.Channel.TOUCH) {
+        if (payload.size < 8) return null
+        val dataLen = CarlifeFrame.u16BE(payload, 0)
+        if (8 + dataLen > payload.size) return null     // 半包/坏包：显式拒绝（零填充保护）
+        val serviceType = CarlifeFrame.u32BE(payload, 4).toInt()
+        val data = if (dataLen == 0) ByteArray(0) else payload.copyOfRange(8, 8 + dataLen)
+        return CmdMessage(serviceType, data)
+    }
+    if (payload.size < 12) return null
+    val dataLen = CarlifeFrame.u32BE(payload, 0)
+    if (12 + dataLen > payload.size) return null
+    val serviceType = CarlifeFrame.u32BE(payload, 8).toInt()
+    val data = if (dataLen == 0L) ByteArray(0) else payload.copyOfRange(12, 12 + dataLen.toInt())
     return CmdMessage(serviceType, data)
 }

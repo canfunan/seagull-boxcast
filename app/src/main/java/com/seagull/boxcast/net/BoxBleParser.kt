@@ -30,7 +30,9 @@ object BoxBleParser {
         var i = 0
         var ffCount = 0
         while (i < scanRecord.size - 1) {
-            val len = scanRecord[i].toInt() and 0xFF
+            // 权威 parseSsids:421,448 用**有符号** byte b（AD 段长≥128 时符号扩展）——
+            // 原 and 0xFF 无符号化与之行为相反
+            val len = scanRecord[i].toInt()
             if (len == 0) return null
             val typeIdx = i + 1
             if (typeIdx >= scanRecord.size) return null
@@ -38,7 +40,8 @@ object BoxBleParser {
             if (type == 0xFF) {   // Manufacturer Specific Data
                 val valueEnd = minOf(typeIdx + len, scanRecord.size)
                 val value = scanRecord.copyOfRange(typeIdx + 1, valueEnd)
-                if (ffCount == 1 && value.size > 16) {
+                // 权威 ≥16 即解密（原 >16 会在恰好 16B 时漏解）
+                if (ffCount == 1 && value.size >= 16) {
                     return decodeSecondFf(value)
                 }
                 ffCount++
@@ -55,9 +58,11 @@ object BoxBleParser {
             val cipher = Cipher.getInstance(BoxCrypto.TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"))
             val dec = cipher.doFinal(value.copyOfRange(0, 16))
-            // 解密结果再 XOR aesKey
-            for (k in dec.indices) {
-                dec[k] = (dec[k].toInt() xor keyBytes[k % keyBytes.size].toInt()).toByte()
+            // 解密结果再 XOR aesKey——**只 XOR min(16, keyBytes.size) 字节**
+            // （原 k%size 环绕与权威不符；16B 密文场景巧合一致）
+            val xorLen = minOf(16, keyBytes.size)
+            for (k in 0 until xorLen) {
+                dec[k] = (dec[k].toInt() xor keyBytes[k].toInt()).toByte()
             }
             val head = String(dec, Charsets.UTF_8)
             val tail = String(value.copyOfRange(16, value.size), Charsets.UTF_8)

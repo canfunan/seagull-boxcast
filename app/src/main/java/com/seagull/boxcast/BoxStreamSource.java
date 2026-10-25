@@ -24,6 +24,8 @@ public final class BoxStreamSource implements CanvasSource {
     private static final String TAG = "BoxStreamSource";
     private static final String MIME = "video/avc";
 
+    // 注：实例获取走 BoxConnectionHolder.streamSource（海鸥侧创建后注册）
+
     private final String name;
     private MediaCodec decoder;
     private volatile boolean ready = false;
@@ -38,6 +40,43 @@ public final class BoxStreamSource implements CanvasSource {
         return -1;   // 非 VirtualDisplay 源
     }
 
+    /**
+     * 编码器回调线程专用：**只入队不阻塞**（原 feedFrame 在编码回调线程同步
+     * dequeueInputBuffer(10ms) → 拖慢输出消费 → VD 丢帧）。
+     * 独立解码线程消费；队列满丢最旧帧。
+     */
+    public static void postFrame(byte[] data, boolean key) {
+        BoxStreamSource self = com.seagull.boxcast.video.BoxConnectionHolder.streamSource;
+        if (self == null || !self.ready) return;
+        self.frameQueue.offer(new Frame(data, key));
+    }
+
+    private static final class Frame {
+        final byte[] data; final boolean key;
+        Frame(byte[] d, boolean k) { data = d; key = k; }
+    }
+
+    private final java.util.concurrent.LinkedBlockingQueue<Frame> frameQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>(8);
+    private volatile boolean decodeLoopRunning = false;
+
+    /** 解码消费循环（attachSurface 时起） */
+    private void startDecodeLoop() {
+        if (decodeLoopRunning) return;
+        decodeLoopRunning = true;
+        Thread t = new Thread(() -> {
+            while (decodeLoopRunning) {
+                Frame f = null;
+                try { f = frameQueue.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS); }
+                catch (InterruptedException e) { break; }
+                if (f == null) continue;
+                try { feedFrame(f.data, f.key); } catch (Exception e) { Log.e(TAG, "decode loop", e); }
+            }
+        }, "BoxDecode");
+        t.setDaemon(true);
+        t.start();
+    }
+
     @Override
     public boolean ready() {
         return ready;
@@ -46,12 +85,14 @@ public final class BoxStreamSource implements CanvasSource {
     @Override
     public synchronized boolean attachSurface(Surface surface, int w, int h, int dpi) {
         try {
+            releaseDecoder();   // 二次 attach 先释放旧 decoder（MediaCodec 泄漏修复）
             decoder = MediaCodec.createDecoderByType(MIME);
             MediaFormat fmt = MediaFormat.createVideoFormat(MIME, w, h);
             decoder.configure(fmt, surface, null, 0);
             decoder.start();
             configured = true;
             ready = true;
+            startDecodeLoop();
             Log.i(TAG, name + " attachSurface " + w + "x" + h + " decoder started");
             return true;
         } catch (Exception e) {
@@ -63,6 +104,8 @@ public final class BoxStreamSource implements CanvasSource {
 
     @Override
     public synchronized void detachSurface() {
+        decodeLoopRunning = false;
+        frameQueue.clear();
         // 只断渲染，不解码器（快速切回时省一次 configure）
         Log.i(TAG, name + " detachSurface");
     }

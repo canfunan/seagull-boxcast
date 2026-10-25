@@ -108,6 +108,18 @@ class BoxDiscovery(private val context: Context) {
             }
         }
         scanner.startScan(filters, settings, cb)
+        bleScanner = scanner
+        bleCallback = cb          // clear() 停扫描用（原 BLE 常开）
+    }
+
+    private var bleScanner: android.bluetooth.le.BluetoothLeScanner? = null
+    private var bleCallback: android.bluetooth.le.ScanCallback? = null
+
+    /** 停 BLE 扫描（原版 startBleScan 无对应 stop → BLE 常开耗电） */
+    @SuppressLint("MissingPermission")
+    fun stopBleScan() {
+        runCatching { bleScanner?.stopScan(bleCallback) }
+        bleScanner = null; bleCallback = null
     }
 
     // ---------- 2) UDP 广播 ----------
@@ -121,9 +133,10 @@ class BoxDiscovery(private val context: Context) {
                         sock.broadcast = true
                         sock.bind(InetSocketAddress(UDP_PORT))
                         val buf = ByteArray(512)
-                        while (true) {
+                        // isActive 退出（原 while(true) 无退出 → socket 永久存活）
+                        while (isActive) {
                             val p = DatagramPacket(buf, buf.size)
-                            sock.receive(p)
+                            runCatching { sock.receive(p) }.getOrNull() ?: break
                             val text = String(p.data, 0, p.length)
                             if (NAME_KEYWORDS.any { text.contains(it, ignoreCase = true) }) {
                                 add(Found(text.take(32), p.address.hostAddress ?: "", "udp"))
@@ -200,6 +213,8 @@ class BoxDiscovery(private val context: Context) {
         context.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 
     fun clear() {
+        stopBleScan()          // 停 BLE（原只清列表，扫描器继续跑）
+        runCatching { scope.cancel() }   // UDP 监听协程/socket 一并停
         found.clear()
         _boxes.value = emptyList()
     }

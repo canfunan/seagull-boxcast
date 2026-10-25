@@ -101,7 +101,7 @@ class BoxConnection(private val appContext: Context) {
     private var readJob: Job? = null
     private var hbJob: Job? = null
     private var writeThread: Thread? = null
-    private var writeActive = false
+    @Volatile private var writeActive = false
 
     /**
      * 独立写队列（对照原版 ConnectSocket.WriteThread 实证：priority 10 + BlockingQueue）。
@@ -159,6 +159,9 @@ class BoxConnection(private val appContext: Context) {
     fun startServer() {
         if (serverJob?.isActive == true) return
         lastHost = "server"
+        // 必坏级修复：服务端模式此前从不调 startWriteThread() → writeActive=false →
+        // 所有 enqueue 静默丢弃（MD_INFO/心跳/102406/102408 一律发不出，无日志）。
+        if (!writeActive) startWriteThread()
         serverJob = scope.launch {
             for ((channel, port) in SERVER_PORTS) {
                 launch(Dispatchers.IO) {
@@ -171,7 +174,9 @@ class BoxConnection(private val appContext: Context) {
                             s.keepAlive = true
                             s.receiveBufferSize = RECV_BUFFER_SIZE
                             s.sendBufferSize = SEND_BUFFER_SIZE
-                            serverSockets[channel] = s
+                            serverSockets.put(channel, s)?.let { old ->   // 覆盖前关旧（FD 泄漏）
+                                if (old !== s) runCatching { old.close() }
+                            }
                             Log.i(TAG, "AcceptThread ch=$channel accepted ${s.inetAddress}")
                             // 该通道的读循环
                             val r = FrameReader()
@@ -184,7 +189,11 @@ class BoxConnection(private val appContext: Context) {
                                 } catch (e: Exception) {
                                     Log.e(TAG, "ch=$channel read end: ${e.message}")
                                 }
-                                serverSockets.remove(channel)
+                                runCatching { s.close() }
+                                // identity 比对：只删自己这条（新连接的映射可能已覆盖）
+                                serverSockets.remove(channel)?.let { cur ->
+                                    if (cur !== s) serverSockets[channel] = cur
+                                }
                             }
                             // cmd 通道连上即视为连接建立（Hello 会随后到）
                             if (channel == CarlifeFrame.Channel.CMD) {
@@ -199,7 +208,7 @@ class BoxConnection(private val appContext: Context) {
 
     /** 按 channel 取输出流（服务端模式路由） */
     private fun channelOut(channel: Int): OutputStream? =
-        serverSockets[channel]?.takeIf { it.isConnected }?.getOutputStream()
+        serverSockets[channel]?.takeIf { !it.isClosed && it.isConnected }?.getOutputStream()
 
     // ---------- 连接 ----------
 
@@ -210,8 +219,9 @@ class BoxConnection(private val appContext: Context) {
     /** 断开后自动重连（退避 1s→2s→4s…30s 封顶）；destroy() 停止 */
     @Volatile var autoReconnect = true
     private var lastHost: String? = null
-    private var reconnectJob: Job? = null
+    @Volatile private var reconnectJob: Job? = null
     private var reconnectDelay = 1000L
+    private val reconnectLock = Any()
 
     fun connect(host: String) {
         lastHost = host
@@ -246,8 +256,9 @@ class BoxConnection(private val appContext: Context) {
             socket = s
             out = s.getOutputStream()
             reader = FrameReader()
-            startWriteThread()
+            if (!writeActive) startWriteThread()   // 幂等：客户端/服务端共用一条写线程
             startReadLoop(s.getInputStream())
+            reconnectDelay = 1000L                  // 手动连上也重置退避（原仅 reconnect 重置）
             true
         } catch (e: Exception) {
             runCatching { s.close() }
@@ -263,16 +274,15 @@ class BoxConnection(private val appContext: Context) {
         writeThread = Thread({
             android.os.Process.setThreadPriority(10)   // 原版 setPriority(10)
             val bos = BufferedOutputStream(out, SEND_BUFFER_SIZE)
+            // poll(超时) 而非 take()：close() 置 false + interrupt 后最多 200ms 退出
+            // （take() 吞 InterruptedException 且清中断标志 → 线程永久阻塞泄漏）
             while (writeActive) {
-                val (ch, frame) = runCatching { writeQueue.take() }.getOrNull() ?: continue
+                val item = runCatching { writeQueue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrNull()
+                    ?: continue
+                val (ch, frame) = item
                 runCatching {
-                    // 客户端模式：统一 bos；服务端模式：按 channel 选 socket
-                    val target = channelOut(ch) ?: bos
-                    if (target == null) {
-                        // 服务端模式该通道未接入（盒子没连这个端口）→ 丢弃该帧
-                        if (serverSockets.isNotEmpty()) return@runCatching
-                        error("no output stream")
-                    }
+                    // 服务端模式：按 channel 路由到对应 socket；客户端模式：bos
+                    val target = channelOut(ch) ?: if (serverSockets.isNotEmpty()) return@runCatching else bos
                     target.write(frame)
                     target.flush()
                 }.onFailure {
@@ -281,15 +291,19 @@ class BoxConnection(private val appContext: Context) {
                     return@Thread
                 }
             }
+            Log.i(TAG, "write thread exit")
         }, "BoxWrite").apply { start() }
     }
 
-    /** 组帧入队（所有发送统一走这里） */
+    /** 组帧入队。视频/音频大数据帧可弃（拥塞时丢帧保连接），控制帧（ch1/ch6）满才断 */
     private fun enqueue(frame: ByteArray, channel: Int = CarlifeFrame.Channel.CMD) {
         if (!writeActive) return
-        if (!writeQueue.offer(channel to frame)) {
-            Log.e(TAG, "write queue full, disconnect")
+        if (writeQueue.offer(channel to frame)) return
+        if (channel == CarlifeFrame.Channel.CMD || channel == CarlifeFrame.Channel.TOUCH) {
+            Log.e(TAG, "ctrl queue full, disconnect")
             close()
+        } else {
+            Log.w(TAG, "data queue full, drop frame (ch=$channel size=${frame.size})")
         }
     }
 
@@ -311,7 +325,7 @@ class BoxConnection(private val appContext: Context) {
 
     private fun handleFrame(channel: Int, payload: ByteArray) {
         var body = if (USE_INNER_FRAME) {
-            parseInner(payload) ?: return
+            parseInner(payload, channel) ?: return
         } else {
             // 裸 protobuf 模式：channel 即 serviceType（联调时按实际调整）
             com.seagull.boxcast.frame.CmdMessage(channel, payload)
@@ -397,13 +411,13 @@ class BoxConnection(private val appContext: Context) {
         val verifyCode = VerifyCode.compute(appContext, hello.type, hello.mac, hello.active, hello.randomvalue)
         Log.i(TAG, "verifyCode=$verifyCode")
 
+        // 权威 verifyBoxTag:126-142：tag/verifyCode 为空或 !hasActive → 2(未激活)；
+        // tag≠code → 0(未授权)；active==0 → 1(未激活)；否则 3(已授权)
         var code = when {
-            verifyCode.isNullOrEmpty() -> BoxTypes.IS_BOX_NOT_AUTHORIZED
-            hello.tag.isEmpty() -> BoxTypes.IS_BOX_NOT_ACTIVATED
-            hello.tag != verifyCode -> BoxTypes.IS_BOX_NOT_AUTHORIZED
-            hello.active == 0 -> BoxTypes.IS_BOX_NOT_ACTIVATED
-            hello.boxVersion == BoxTypes.VERSION_YUNDIAN_1 -> BoxTypes.IS_BOX_VERSION_TOO_OLD
-            else -> BoxTypes.IS_BOX_AND_AUTHORIZED
+            verifyCode.isNullOrEmpty() || hello.tag.isEmpty() || hello.active == 0 ->
+                BoxTypes.IS_BOX_NOT_ACTIVATED          // 2
+            hello.tag != verifyCode -> BoxTypes.IS_BOX_NOT_AUTHORIZED   // 0
+            else -> BoxTypes.IS_BOX_AND_AUTHORIZED                      // 3
         }
         _state.value = State.Authorized(hello, code)
         Log.i(TAG, "boxAuthorized=$code")
@@ -433,9 +447,24 @@ class BoxConnection(private val appContext: Context) {
     private fun send(serviceType: Int, payload: ByteArray, channel: Int = CarlifeFrame.Channel.CMD) {
         val secured = encryptHandshake.encryptIfEnabled(payload)
         val body = if (USE_INNER_FRAME) {
-            CarlifeFrame.inner(serviceType, secured)
+            CarlifeFrame.inner(serviceType, secured, channel)   // 双格式（ch1/6=8B，ch2-5=12B）
         } else secured
         enqueue(CarlifeFrame.outer(channel, body), channel)
+    }
+
+    /**
+     * 数据通道裸写（权威 ConnectSocket.writeData/AoaWriteTransport 实证）：
+     * 音频/视频数据帧 = [12B PCM/视频头][data]，**不套** CarlifeCmdMessage 内层头。
+     * 此前把 inner() 套在数据帧上 → 盒子按裸格式解必错。
+     */
+    fun sendRawData(channel: Int, head12: ByteArray, data: ByteArray) {
+        require(head12.size == 12) { "data head must be 12B" }
+        val frame = ByteArray(8 + 12 + data.size)
+        CarlifeFrame.putU32BE(frame, 0, channel.toLong())
+        CarlifeFrame.putU32BE(frame, 4, (12 + data.size).toLong())
+        head12.copyInto(frame, 8)
+        data.copyInto(frame, 20)
+        enqueue(frame, channel)
     }
 
     /** 102401 改帧宽高（sendWH2Box 复刻） */
@@ -459,7 +488,7 @@ class BoxConnection(private val appContext: Context) {
     fun sendRawTwoPart(serviceType: Int, meta: ByteArray, raw: ByteArray,
                        channel: Int = CarlifeFrame.Channel.VIDEO) {
         val body = if (USE_INNER_FRAME) {
-            CarlifeFrame.inner(serviceType, meta)
+            CarlifeFrame.inner(serviceType, meta, channel)   // 双格式
         } else meta
         val frame = if (USE_INNER_FRAME) {
             // [channel][len(header+raw)] 头里 len 覆盖两段（与 d/o.java:83-91 一致）
@@ -505,23 +534,32 @@ class BoxConnection(private val appContext: Context) {
 
     // ---------- 关闭 ----------
 
+    @Synchronized
     fun close() {
+        val wasServer = lastHost == "server" && serverSockets.isNotEmpty()
         writeActive = false
         writeQueue.clear()
         runCatching { writeThread?.interrupt() }
         runCatching { socket?.close() }
+        runCatching { out?.close() }
+        socket = null; out = null; reader = null
+        // 服务端模式：6 个 Accept/读循环必须停（否则 close 后继续跑并重填 serverSockets）
+        runCatching { serverJob?.cancel() }
         serverSockets.values.forEach { runCatching { it.close() } }
         serverSockets.clear()
         hbJob?.cancel(); readJob?.cancel()
         encryptHandshake.onDisconnection()
         _state.value = State.Closed
-        scheduleReconnect()
+        // 服务端模式不 scheduleReconnect（lastHost="server" 是假 host，DNS 永远失败 → 30s 空转）
+        // 且服务端模式下任一条读循环结束就 close 会把 6 连接全关（误杀）
+        if (autoReconnect && !wasServer) scheduleReconnect()
     }
 
     /** 退避重连（读循环异常退出/写失败都会走到 close → 这里接住） */
     private fun scheduleReconnect() {
         if (!autoReconnect) return
-        val host = lastHost ?: return
+        val host = lastHost?.takeIf { it != "server" && it.isNotBlank() } ?: return
+        synchronized(reconnectLock) {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
             Log.i(TAG, "reconnect in ${reconnectDelay}ms to $host")
@@ -535,6 +573,7 @@ class BoxConnection(private val appContext: Context) {
                 }
             }
             scheduleReconnect()   // 全端口失败，继续退避
+        }
         }
     }
 

@@ -34,18 +34,25 @@ class DebugHttpServer(private val port: Int = 9977) {
 
         /** /cast/start 触发：启动 ProxyActivity 拿授权（appContext，不依赖 Activity 生命周期） */
         @Volatile var appContext: android.content.Context? = null
+
+        /** 单例：DebugService 重启后复用同一实例（防端口 BindException） */
+        @Volatile var instance: DebugHttpServer? = null
         @Volatile var stopTrigger: (() -> Unit)? = null
 
         /** 内存日志环（App 内 Log.i 双写，/log 也能读） */
         val ring = CopyOnWriteArrayList<String>()
+        private val ringLock = Any()
         fun log(tag: String, msg: String) {
-            ring.add("${System.currentTimeMillis() / 1000 % 100000} [$tag] $msg")
-            if (ring.size > 500) ring.removeAt(0)
+            synchronized(ringLock) {
+                ring.add("${System.currentTimeMillis() / 1000 % 100000} [$tag] $msg")
+                while (ring.size > 500) ring.removeAt(0)   // 原子修剪（原 if+removeAt 并发 IOOBE）
+            }
         }
     }
 
     @Volatile private var running = false
     private var serverThread: Thread? = null
+    @Volatile private var serverSocket: ServerSocket? = null
 
     fun start() {
         if (running) return
@@ -53,20 +60,27 @@ class DebugHttpServer(private val port: Int = 9977) {
         serverThread = Thread({
             try {
                 val ss = ServerSocket(port, 50, java.net.InetAddress.getByName("127.0.0.1"))
+                serverSocket = ss
                 Log.i(TAG, "debug http on 127.0.0.1:$port")
+                ss.soTimeout = 1000   // 1s 轮询：stop() 后最多 1s 退出（accept 不可 interrupt）
                 while (running) {
-                    runCatching {
-                        val s = ss.accept()
-                        Thread({ handle(s) }, "dbg").start()
-                    }
+                    val s = runCatching { ss.accept() }.getOrNull() ?: continue
+                    Thread({ handle(s) }, "dbg").start()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "server stop: ${e.message}")
+            } finally {
+                runCatching { serverSocket?.close() }   // **必须 close**：否则端口永久占，
+                serverSocket = null                     // 重启 start() 必 BindException（9977 假死）
             }
+            Log.i(TAG, "debug http exit")
         }, "DebugHttp").apply { isDaemon = true; start() }
     }
 
-    fun stop() { running = false; runCatching { serverThread?.interrupt() } }
+    fun stop() {
+        running = false
+        runCatching { serverSocket?.close() }   // close 唤醒 accept（interrupt 无效）
+    }
 
     private fun handle(s: Socket) {
         runCatching {
@@ -97,7 +111,8 @@ class DebugHttpServer(private val port: Int = 9977) {
                 val text = runCatching {
                     val p = ProcessBuilder("logcat", "-d", "-t", "$n", "--pid=${android.os.Process.myPid()}")
                         .redirectErrorStream(true).start()
-                    p.inputStream.bufferedReader().readText()
+                    try { p.inputStream.bufferedReader().readText() }
+                    finally { runCatching { p.destroy() } }   // 防僵尸进程累积
                 }.getOrElse { ring.takeLast(n).joinToString("\n") }
                 "200" to escape(text)
             }
@@ -132,8 +147,20 @@ class DebugHttpServer(private val port: Int = 9977) {
         return """{"connection":"${st?.javaClass?.simpleName}","authorized":${st is com.seagull.boxcast.net.BoxConnection.State.Authorized},"code":${(st as? com.seagull.boxcast.net.BoxConnection.State.Authorized)?.code ?: -1},"hello":{"type":"${hello?.type ?: ""}","tag":"${hello?.tag ?: ""}"},"root":{"su":${rs.suAvailable},"keepalive":${rs.keepaliveInstalled},"oomImmune":${rs.oomImmune},"accessibility":${rs.accessibilityOn}},"vehicleState":${conn?.vehicleState?.value?.connectState ?: -1}}"""
     }
 
-    private fun escape(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"")
-        .replace("\n", "\\n").replace("\r", "").replace("\t", "  ") + "\""
+    private fun escape(s: String): String {
+        val sb = StringBuilder("\"")
+        for (c in s) {
+            when (c) {
+                '\\' -> sb.append("\\\\")
+                '"' -> sb.append("\\\"")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("  ")
+                else -> if (c.code < 0x20) sb.append("\\u%04x".format(c.code)) else sb.append(c)
+            }
+        }
+        return sb.append('"').toString()
+    }""
 }
 
 /**
@@ -144,8 +171,10 @@ object MockSelf {
     fun run(conn: BoxConnection?) {
         val log = { m: String -> DebugHttpServer.log("mock", m) }
         log("连接 127.0.0.1:7240 ...")
+        var sock: java.net.Socket? = null
         runCatching {
             val s = java.net.Socket("127.0.0.1", 7240)
+            sock = s
             s.tcpNoDelay = true
             log("已连，发 Hello")
             // 帧构造直接用 CarlifeFrame（外层 [channel:u32][len:u32] + 内层 8B 头）
@@ -207,6 +236,7 @@ object MockSelf {
             else log("❌ 没收到 H264——看 /log 找 BoxConnection/ScreenCast 日志")
             s.close()
         }.onFailure { log("mock 异常: ${it.message}") }
+        finally { runCatching { sock?.close() } }   // 异常路径也关 socket
     }
 
     private fun md5hex(s: String): String =

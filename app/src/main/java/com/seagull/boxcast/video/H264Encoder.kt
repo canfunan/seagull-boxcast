@@ -72,26 +72,25 @@ class H264Encoder(
         }
 
         // MediaProjection → VirtualDisplay("BoxCast") → 编码器 input surface。
-        // Android 13+：同一 projection 实例只能 createVirtualDisplay 一次
-        // （SecurityException: Don't take multiple captures on the same instance）
-        // → VD 缓存复用（免重复授权的另一半）；缓存失效才新建
-        val cached = com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay
-        virtualDisplay = if (cached != null && cached.display != null) {
-            Log.i(TAG, "复用缓存 VirtualDisplay（免重新 capture）")
-            // 复用 VD：需把编码器 surface 挂上去——VD 的 surface 不能热换，
-            // 因此复用时必须同参数（宽度/高度变化仍走重建路径）
-            if (cached.display.width == width && cached.display.height == height) {
-                resizeIfNeeded(width, height)
-                cached
-            } else {
-                com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay = null
-                cached.release()
-                createVD(mediaProjection, width, height, inputSurface, encoderHandler)
-            }
-        } else {
-            createVD(mediaProjection, width, height, inputSurface, encoderHandler)
+        // **不做 VD 缓存复用**（复盘实证 100% 黑屏）：VD 的 surface 在创建时绑定，
+        // release 后 getDisplay() 仍非 null → 复用死 VD 新 surface 没挂上去；
+        // 且同 projection 实例二次 createVirtualDisplay 在 Android 13+ 抛
+        // SecurityException。每次 start 都新建 VD；projection 失效则重新授权。
+        val mp = mediaProjection
+        if (mp == null) {
+            Log.e(TAG, "no media projection, abort start")
+            stop()
+            return
         }
-        com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay = virtualDisplay
+        val vd = runCatching {
+            createVD(mp, width, height, inputSurface, encoderHandler)
+        }.onFailure { Log.e(TAG, "createVirtualDisplay fail（projection 可能已失效，需重新授权）: ${it.message}") }.getOrNull()
+        if (vd == null) {
+            stop()
+            return
+        }
+        virtualDisplay = vd
+        com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay = vd
         running = true
         currentFps = fps
         currentWidth = width
@@ -120,8 +119,11 @@ class H264Encoder(
                 // 丢弃会导致花屏/黑屏。当关键帧处理，发送端原样转发即可。
                 val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0 ||
                     info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
-                onFrame(out, key, info.presentationTimeUs)
-                codec.releaseOutputBuffer(index, false)
+                try {
+                    onFrame(out, key, info.presentationTimeUs)
+                } finally {
+                    runCatching { codec.releaseOutputBuffer(index, false) }   // finally：异常也释放
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "output buffer", e)
             }
@@ -129,6 +131,7 @@ class H264Encoder(
 
         override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
             Log.e(TAG, "codec error", e)
+            running = false          // codec 死后不会再有帧：必须标记，否则永远黑屏
         }
 
         override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
@@ -161,6 +164,7 @@ class H264Encoder(
         private set
 
     /** 102401 改帧宽高（盒子侧协商） */
+    @Synchronized
     fun reconfigure(width: Int, height: Int, bitrate: Int = currentBitrate, fps: Int = currentFps) {
         Log.i(TAG, "reconfigure -> ${width}x$height @${fps}fps ${bitrate}bps")
         stop()
@@ -178,9 +182,6 @@ class H264Encoder(
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, handler)
     }
 
-    /** 复用 VD 时参数对齐（分辨率没变就不动） */
-    private fun resizeIfNeeded(w: Int, h: Int) { /* no-op：同参数无需 resize */ }
-
     fun stop() {
         running = false
         runCatching { virtualDisplay?.release() }
@@ -188,7 +189,14 @@ class H264Encoder(
         runCatching { codec?.release() }
         runCatching { inputSurface?.release() }
         runCatching { encoderThread?.quitSafely() }
+        val vd = virtualDisplay
         virtualDisplay = null; codec = null; inputSurface = null
         encoderThread = null; encoderHandler = null
+        // 必须同步清 Holder：否则 Holder 变野指针，下次 start 复用已 release 的 VD（黑屏）。
+        // 只清自己那条（Holder 里若是别的实例——双 encoder 异常场景——不动它）
+        val held = com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay
+        if (held == null || held === vd) {
+            com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay = null
+        }
     }
 }

@@ -58,6 +58,11 @@ class ScreenCastService : Service() {
         }
         when (intent.action) {
             ACTION_START -> {
+                // 幂等：已在投屏 → 只更新参数，不重建（连点/HTTP 并发/STICKY 重启会二次进入）
+                if (encoder?.running == true) {
+                    Log.i("ScreenCast", "already casting, ignore duplicate START")
+                    return START_STICKY
+                }
                 val notif = NotificationCompat.Builder(this, CHANNEL_ID)
                     .setContentTitle("BoxCast")
                     .setContentText("正在向盒子投屏")
@@ -80,17 +85,20 @@ class ScreenCastService : Service() {
                 if (mp == null) {
                     val rCode = BoxConnectionHolder.projectionResultCode
                     val rData = BoxConnectionHolder.projectionData
-                    BoxConnectionHolder.projectionData = null
                     mp = runCatching {
                         val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
                         val projection = mpm.getMediaProjection(rCode,
                             rData ?: error("projection data null"))
+                        // 成功后焚毁 token（失败不焚：用户不必重走授权弹窗）
+                        BoxConnectionHolder.projectionData = null
                         projection.registerCallback(object : android.media.projection.MediaProjection.Callback() {
                             override fun onStop() {
-                                Log.i("ScreenCast", "MediaProjection onStop（用户/系统收回）→ 清缓存停投")
+                                Log.i("ScreenCast", "MediaProjection onStop（用户/系统收回）→ 完整清理停投")
+                                teardownCast()
+                                runCatching { BoxConnectionHolder.virtualDisplay?.release() }
                                 BoxConnectionHolder.projection = null
                                 BoxConnectionHolder.virtualDisplay = null
-                                runCatching { encoder?.stop() }
+                                stopForeground(STOP_FOREGROUND_REMOVE)   // 通知残留修复
                                 stopSelf()
                             }
                         }, android.os.Handler(android.os.Looper.getMainLooper()))
@@ -102,9 +110,7 @@ class ScreenCastService : Service() {
                     Log.i("ScreenCast", "复用缓存 projection（免弹窗）")
                 }
                 if (mp == null) {
-                    stopSelf(); return START_NOT_STICKY
-                }
-                if (mp == null) {
+                    Log.e("ScreenCast", "projection null（授权失效），停")
                     stopSelf(); return START_NOT_STICKY
                 }
                 val dm: android.hardware.display.DisplayManager =
@@ -139,13 +145,24 @@ class ScreenCastService : Service() {
                 videoSender?.sendEmptyForeground()
 
                 handshake?.onConfigureEncoder = { hw, hh, hf ->
-                    encoder?.changeFrameRate(hf)   // 按 HU 期望调整（分辨率同理由 reconfigure 处理）
+                    // 按 HU 期望**全参数** reconfigure（原只改 fps → INIT_DONE 回报与实际
+                    // 编码参数不一致 → HU 花屏）；成功后再回 INIT_DONE（回报真实参数）
+                    encoder?.reconfigure(hw, hh, br, hf)
                     handshake?.encWidth = hw; handshake?.encHeight = hh; handshake?.encFps = hf
                     handshake?.sendInitDone()
                 }
-                handshake?.onStartStreaming = { handshakeStarted = true }
-                handshake?.onPauseStreaming = { handshakeStarted = false }
-                handshake?.onFrameRateChange = { f -> encoder?.changeFrameRate(f) }
+                handshake?.onStartStreaming = {
+                    handshakeStarted = true
+                    videoSender?.resumeFromHeadUnit()      // HU PAUSE 时收不到后台空包的修复
+                }
+                handshake?.onPauseStreaming = {
+                    handshakeStarted = false
+                    videoSender?.pauseFromHeadUnit()
+                }
+                handshake?.onFrameRateChange = { f ->
+                    encoder?.changeFrameRate(f)
+                    handshake?.encFps = f          // DONE 回报的帧率必须与实际一致
+                }
                 conn.onVideoEncoderInit = { hw, hh, hf -> handshake?.onEncoderInit(hw, hh, hf) }
                 conn.onVideoEncoderStart = { handshake?.onEncoderStart() }
                 conn.onVideoEncoderPause = { handshake?.onEncoderPause() }
@@ -172,15 +189,23 @@ class ScreenCastService : Service() {
                     if (allow) {
                         if (useStandard) videoSender?.sendFrame(data) else sender?.sendFrame(data, key, pts)
                     }
-                    // 本地环回：同时喂 PipBoard 远端流槽位（验证解码渲染管线）
-                    BoxConnectionHolder.streamSource?.feedFrame(data, key)
+                    // 本地环回：PipBoard 远端流槽位。**异步入队**——
+                    // feedFrame 是 synchronized 且内部 dequeueInputBuffer(10ms)，
+                    // 在编码器回调线程同步调用会拖慢输出缓冲消费 → VD 丢帧
+                    runCatching {
+                        com.seagull.boxcast.BoxStreamSource.postFrame(data, key)
+                    }
                 }
                 encoder?.start(w, h, br, fps)
             }
             ACTION_STOP -> {
-                sender?.finish()
-                encoder?.stop()
+                teardownCast()
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            else -> {
+                // 未知 action（含 ROM 保活 intent）：5s 内必须 startForeground 或退，否则
+                // Android 12+ ForegroundServiceDidNotStartInTimeException 崩
                 stopSelf()
             }
         }
@@ -194,7 +219,7 @@ class ScreenCastService : Service() {
     private var audioSender: com.seagull.boxcast.audio.AudioChannel.Sender? = null
     private var videoSender: VideoSender? = null
     private var handshake: VideoHandshake? = null
-    private var handshakeStarted = false
+    @Volatile private var handshakeStarted = false
 
     /**
      * 内部音频采集（AudioPlaybackCapture，Android 10+ 公开 API）：
@@ -237,13 +262,17 @@ class ScreenCastService : Service() {
                 val rec = recBuilder.build() as android.media.AudioRecord
                 audioRecord = rec
                 rec.startRecording()
+                try {
                 val buf = ByteArray(minBuf)
-                while (audioThread?.isInterrupted == false) {
+                // 省电模式（熄屏/车机退后台）也停音频采集上传（原注释说停、实现没停）
+                while (audioThread?.isInterrupted == false && !powerSaving) {
                     val n = rec.read(buf, 0, buf.size)
-                    if (n > 0) audioSender?.write(buf.copyOf(n))
+                    if (n > 0 && !powerSaving) audioSender?.write(buf.copyOf(n))
                 }
-                rec.stop()
-                rec.release()
+                } finally {
+                    runCatching { rec.stop() }
+                    runCatching { rec.release() }     // finally：异常路径也释放
+                }
             }.onFailure { Log.e("ScreenCast", "audio capture fail", it) }
         }, "AudioCapture").apply { start() }
     }
@@ -258,10 +287,10 @@ class ScreenCastService : Service() {
             scheduleAtFixedRate(object : java.util.TimerTask() {
                 private var last: com.seagull.boxcast.net.MediaInfo.Info? = null
                 override fun run() {
-                    val cur = runCatching {
+                    val cur: com.seagull.boxcast.net.MediaInfo.Info? = runCatching {
                         com.seagull.boxcast.net.MediaNotificationListener.currentTrack()
-                    }.getOrNull() ?: return
-                    if (!cur.equals(last)) {
+                    }.getOrNull()
+                    if (cur != null && cur != last) {
                         last = cur
                         runCatching {
                             conn.sendRaw(com.seagull.boxcast.frame.CarlifeFrame.CmdId.MSG_CMD_MEDIA_INFO,
@@ -286,17 +315,43 @@ class ScreenCastService : Service() {
         Log.i("ScreenCast", "power saving: resume streaming")
     }
 
-    private var powerSaving = false
+    @Volatile private var powerSaving = false
 
-    override fun onDestroy() {
-        sender?.finish()
-        videoSender?.sendEmptyBackground()
-        encoder?.stop()
+    /** 统一 teardown：停采集/解绑回调/停编码（ACTION_STOP 与 onDestroy 共用） */
+    private fun teardownCast() {
+        runCatching { sender?.finish() }
+        runCatching { videoSender?.sendEmptyBackground() }
+        runCatching { encoder?.stop() }
         handshakeStarted = false
         audioThread?.interrupt()
-        audioSender?.stop()
+        runCatching { audioSender?.stop() }
         mediaInfoJob?.cancel()
-        runCatching { audioRecord?.stop(); audioRecord?.release() }
+        runCatching { audioRecord?.stop() }
+        runCatching { audioRecord?.release() }
+        audioRecord = null
+        // **解绑全部 14 个回调**：否则全局 Holder.connection 持旧 Service 整棵树，
+        // Service 不可 GC，且新连接上这些回调操作已 stop 的旧 sender（点播状态机错乱）
+        val conn = BoxConnectionHolder.connection
+        conn?.onH264ListRequest = null
+        conn?.onH264SendRequest = null
+        conn?.onVideoEncoderInit = null
+        conn?.onVideoEncoderStart = null
+        conn?.onVideoEncoderPause = null
+        conn?.onVideoEncoderReset = null
+        conn?.onVideoFrameRateChange = null
+        conn?.onVersionMatch = null
+        conn?.onScreenOn = null
+        conn?.onScreenOff = null
+        conn?.onVehicleForeground = null
+        conn?.onVehicleBackground = null
+        conn?.onHuInfo = null
+        conn?.onPermissionRequest = null
+        sender = null; videoSender = null; handshake = null; encoder = null
+        audioSender = null
+    }
+
+    override fun onDestroy() {
+        teardownCast()
         super.onDestroy()
     }
 

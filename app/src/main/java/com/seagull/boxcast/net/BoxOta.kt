@@ -46,9 +46,13 @@ object BoxOta {
                 conn.outputStream.use { it.write(req.paramjson.toByteArray()) }
             }
             val code = conn.responseCode
-            val body = BufferedReader(InputStreamReader(
-                if (code in 200..299) conn.inputStream else conn.errorStream, Charsets.UTF_8
-            )).use { it.readText() }
+            val body = try {
+                BufferedReader(InputStreamReader(
+                    if (code in 200..299) conn.inputStream else conn.errorStream, Charsets.UTF_8
+                )).use { it.readText() }
+            } finally {
+                runCatching { conn.disconnect() }   // 防连接泄漏（原从不 disconnect）
+            }
             Log.i(TAG, "ota http=$code body=$body")
             val version = runCatching {
                 val json = JSONObject(body)

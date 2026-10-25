@@ -66,24 +66,26 @@ done
             return
         }
         Log.i(TAG, "root 可用，开始自授权 + 部署保活")
-        status.value = status.value.copy(suAvailable = true)
+        status.update { it.copy(suAvailable = true) }
         grantPermissions()
         grantSpecialOps()
         installKeepAlive()
         // 回读验证（UI 显示真实状态）
-        status.value = status.value.copy(
-            setupDone = true,
-            keepaliveInstalled = File("/data/adb/service.d/seagull-boxcast-keepalive.sh").exists()
-                || suOut("ls /data/adb/service.d/ 2>/dev/null | grep seagull").isNotEmpty(),
-            accessibilityOn = android.provider.Settings.Secure.getString(
-                context.contentResolver,
-                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            )?.contains("CastAccessibilityService") == true,
-            notifListenerOn = android.provider.Settings.Secure.getString(
-                context.contentResolver,
-                "enabled_notification_listeners"
-            )?.contains("MediaNotificationListener") == true,
-        )
+        status.update {
+            it.copy(
+                setupDone = true,
+                keepaliveInstalled = File("/data/adb/service.d/seagull-boxcast-keepalive.sh").exists()
+                    || suOut("ls /data/adb/service.d/ 2>/dev/null | grep seagull").isNotEmpty(),
+                accessibilityOn = android.provider.Settings.Secure.getString(
+                    context.contentResolver,
+                    android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                )?.contains("CastAccessibilityService") == true,
+                notifListenerOn = android.provider.Settings.Secure.getString(
+                    context.contentResolver,
+                    "enabled_notification_listeners"
+                )?.contains("MediaNotificationListener") == true,
+            )
+        }
     }
 
     private fun suOut(cmd: String): String = runCatching {
@@ -130,12 +132,12 @@ done
     fun grantSpecialOps() {
         su("appops set $PKG SYSTEM_ALERT_WINDOW allow") { }
         su("appops set $PKG POST_NOTIFICATION allow") { }
-        // 通知监听（HUD 歌曲信息）
-        su("settings put secure enabled_notification_listeners " +
-            "$PKG/com.seagull.boxcast.net.MediaNotificationListener") { }
-        // 无障碍（反控手势注入）
-        su("settings put secure enabled_accessibility_services " +
-            "$PKG/com.seagull.boxcast.inject.CastAccessibilityService") { }
+        // 通知监听（HUD 歌曲信息）——**读改写**：不清掉用户已有的其他监听器
+        appendSecureSetting("enabled_notification_listeners",
+            "$PKG/com.seagull.boxcast.net.MediaNotificationListener")
+        // 无障碍（反控手势注入）——同样读改写
+        appendSecureSetting("enabled_accessibility_services",
+            "$PKG/com.seagull.boxcast.inject.CastAccessibilityService")
         su("settings put secure accessibility_enabled 1") { }
         // Doze/待机白名单
         su("dumpsys deviceidle whitelist +$PKG") { }
@@ -145,7 +147,7 @@ done
         // MediaProjection 授权必须走系统弹窗（用户点一次，之后 Holder 缓存结果）。
         su("appops set $PKG START_FOREGROUND allow") { }
         Log.i(TAG, "特殊权限已配置")
-        status.value = status.value.copy(dozeWhitelisted = true)
+        status.update { it.copy(dozeWhitelisted = true) }
     }
 
     /** 部署 service.d 保活脚本（KernelSU/Magisk 开机常驻） */
@@ -171,7 +173,7 @@ done
                         File("/proc/$pid/oom_score_adj").readText().trim().toIntOrNull()
                     }.getOrNull()
                     if (adj != null && adj <= -900) {
-                        status.value = status.value.copy(oomImmune = true)
+                        status.update { it.copy(oomImmune = true) }
                     }
                 }
                 Thread.sleep(60_000)
@@ -179,13 +181,28 @@ done
         }, "RootGuard").apply { isDaemon = true }.start()
     }
 
+    /** settings secure 读改写：保留原有其他项，去重追加自己 */
+    private fun appendSecureSetting(key: String, value: String) {
+        val cur = suOut("settings get secure $key").let { if (it == "null" || it.isBlank()) "" else it }
+        val parts = cur.split(":").map { it.trim() }.filter { it.isNotEmpty() }.toMutableSet()
+        if (parts.contains(value)) return
+        parts.add(value)
+        su("settings put secure $key ${parts.joinToString(":")}") { }
+    }
+
     // ---- su 执行封装 ----
     private fun su(cmd: String, onOut: (String) -> Unit) {
         runCatching {
             val p = ProcessBuilder(SU_PATH, "-c", cmd).redirectErrorStream(true).start()
-            val out = p.inputStream.bufferedReader().readText().trim()
-            p.waitFor()
-            onOut(out)
+            try {
+                // 10s 超时：su 首次授权弹窗等待不会挂死工作线程
+                val finished = p.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+                if (!finished) { p.destroyForcibly(); return@runCatching }
+                val out = p.inputStream.bufferedReader().readText().trim()
+                onOut(out)
+            } finally {
+                runCatching { p.destroy() }
+            }
         }.onFailure { Log.w(TAG, "su 失败: $cmd -> ${it.message}") }
     }
 

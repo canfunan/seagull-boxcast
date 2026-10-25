@@ -73,6 +73,9 @@ class VideoHandshake(private val conn: BoxConnection) {
 
     fun onEncoderReset() {
         phase = Phase.IDLE
+        // HU RESET(98315) 后必须停推流：否则 handshakeStarted 保持 true 继续发，
+        // 车机侧状态机已重置 → 花屏/错乱
+        onPauseStreaming?.invoke()
     }
 
     fun onFrameRateChange(fps: Int) {

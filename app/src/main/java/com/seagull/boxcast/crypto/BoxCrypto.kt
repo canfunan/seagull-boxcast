@@ -21,12 +21,21 @@ object BoxCrypto {
     const val BOX_KEY_B64 = "H22/emBpCuspF1DYYaJjxQ=="
     const val TRANSFORMATION = "AES/ECB/NoPadding"
 
-    /** 白盒变换钩子：默认恒等。接 so 时在此调用 native getWhiteKey。 */
+    /**
+     * 白盒变换钩子：so 层 libbaiduprotect_sec.getWhiteKey 的实现（Frida 提取后注入）。
+     * 默认 null → 走权威路径的近似（getWhiteKey(CARLIFE_BOX_KEY).getBytes(UTF_8)）。
+     */
     var whiteKeyHook: ((String) -> String)? = null
 
+    /**
+     * 密钥派生——**权威路径**（AESManagerBox.java:23,35 实证）：
+     *   getWhiteKey("H22/emBpCuspF1DYYaJjxQ==").getBytes(UTF_8)
+     * 白盒变换在 so 层（Java 不可见）→ 默认用入参字符串自身 UTF_8 字节（24B/AES-192）；
+     * hook 提取到真 key 后自动覆盖。原 Base64 解码（16B/AES-128）与权威不符。
+     */
     private val keyBytes: ByteArray by lazy {
         val raw = whiteKeyHook?.invoke(BOX_KEY_B64) ?: BOX_KEY_B64
-        Base64.decode(raw, Base64.NO_WRAP)
+        raw.toByteArray(Charsets.UTF_8)
     }
 
     /**
@@ -45,7 +54,7 @@ object BoxCrypto {
         }
     }
 
-    /** AES 密钥（16 字节） */
+    /** AES 密钥（白盒输出 UTF_8 字节；hook 优先） */
     fun aesKey(): ByteArray = keyBytes.copyOf()
 
     fun encrypt(data: ByteArray, len: Int = data.size): ByteArray? =

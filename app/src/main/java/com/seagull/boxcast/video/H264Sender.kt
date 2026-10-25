@@ -37,8 +37,16 @@ class H264Sender(private val conn: BoxConnection) {
     }
 
     /** 盒子 H.264 状态机（BoxH264Manager.checkStatus 实证） */
-    var status: Int = STATUS_DEFAULT
+    @Volatile var status: Int = STATUS_DEFAULT
         private set
+
+    /** START(102408) 实际发出的参数组——finish(102410) 必须复用同一组，
+     *  否则盒子侧 BoxH264Manager 状态机校验失败（原用 configure() 的 UI 值） */
+    private var startWidth = H264Encoder.DEFAULT_WIDTH
+    private var startHeight = H264Encoder.DEFAULT_HEIGHT
+    private var startType = 0
+    private var startFrameType = 0
+    private var startLength = 0L
 
     /**
      * 响应盒子 102405（H264LIST_REQUEST）→ 发 102406。
@@ -69,6 +77,8 @@ class H264Sender(private val conn: BoxConnection) {
         ).encode()
         conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_START, info)
         started = true
+        startWidth = reqWidth; startHeight = reqHeight
+        startType = type; startFrameType = framesType; startLength = length.toLong()
         Log.i(TAG, "sendH264Start -> 102408 ${reqWidth}x$reqHeight")
     }
 
@@ -78,8 +88,8 @@ class H264Sender(private val conn: BoxConnection) {
         conn.sendRaw(CarlifeFrame.CmdId.BOX_SEND_H264_DATA, h264)
     }
 
-    /** 收尾便捷方法（END，用当前配置参数） */
-    fun finish() = sendH264End(width, height, 0, 0, 0)
+    /** 收尾便捷方法（END，复用 START 参数组——盒子状态机校验） */
+    fun finish() = sendH264End(startWidth, startHeight, startType, startLength.toInt(), startFrameType)
 
     /** 102410：收尾（END，SendInfo 同 START 结构） */
     fun sendH264End(width: Int, height: Int, type: Int, length: Int, framesType: Int) {
