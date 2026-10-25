@@ -99,7 +99,13 @@ class MainActivity : ComponentActivity() {
         com.seagull.boxcast.root.RootKeeper.init(this)
         Thread {
             com.seagull.boxcast.root.RootKeeper.setup(this)
-            runOnUiThread { requestRuntimePermissions() }
+            runOnUiThread {
+                requestRuntimePermissions()
+                // 一键投屏：服务端模式自动起（真机日志实证盒子主动连），
+                // 随后自动弹 MediaProjection 授权——用户只需点一次"允许"
+                connection?.startServer()
+                requestProjection()
+            }
         }.start()
         com.seagull.boxcast.root.RootKeeper.startInAppGuard()
 
@@ -125,6 +131,14 @@ class MainActivity : ComponentActivity() {
                     }
                 )
             }
+        }
+    }
+
+    /** 请求 MediaProjection 授权（系统弹窗一次，允许后自动开投） */
+    private fun requestProjection() {
+        runCatching {
+            val mpm = getSystemService(MediaProjectionManager::class.java)
+            projectionLauncher.launch(mpm.createScreenCaptureIntent())
         }
     }
 
