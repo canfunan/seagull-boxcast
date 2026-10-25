@@ -1,7 +1,8 @@
 package com.seagull.boxcast.debug
 
 import android.util.Log
-import com.seagull.boxcast.net.BoxConnectionHolder
+import com.seagull.boxcast.net.BoxConnection
+import com.seagull.boxcast.video.BoxConnectionHolder
 import com.seagull.boxcast.proto.Wire
 import com.seagull.boxcast.root.RootKeeper
 import java.io.BufferedReader
@@ -62,7 +63,7 @@ class DebugHttpServer(private val port: Int = 9977) {
             } catch (e: Exception) {
                 Log.e(TAG, "server stop: ${e.message}")
             }
-        }, "DebugHttp").apply { isDaemon = true }.start()
+        }, "DebugHttp").apply { isDaemon = true; start() }
     }
 
     fun stop() { running = false; runCatching { serverThread?.interrupt() } }
