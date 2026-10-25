@@ -389,9 +389,9 @@ fun MainScreen(
             Text("6. 控制", fontWeight = FontWeight.Bold)
             Row {
                 Button(
-                    // 授权码仅展示/日志：原版收到 Hello 即继续 init BoxH264Manager（tag 不符也投），
-                    // 我们同样放行——算法若有偏差不至于卡死（CarlifeConnectHsgHandler:772-780 实证）
-                    enabled = state is BoxConnection.State.Authorized,
+                    // 永远可点：投屏不依赖盒子先认证（盒子连上后点播协议自然驱动推流；
+                    // 授权码仅日志展示——没连盒子时也能开投屏等盒子，CarlifeConnectHsgHandler 实证）
+                    enabled = true,
                     onClick = onRequestProjection
                 ) { Text("开始投屏") }
                 Spacer(Modifier.width(8.dp))
