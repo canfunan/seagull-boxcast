@@ -383,8 +383,6 @@ class BoxConnection(private val appContext: Context) {
                 }
                 // 盗版盒/未激活处理（CarlifeConnectHsgHandler.java:931-995）：
                 // 0/1/2 → 日志警示（对话框 UI 后续加）
-                else if (body.serviceType == 0) { }
-                // HU 车辆激活（98432）回执占位
                 CarlifeFrame.CmdId.BOX_SEND_H264_END -> { /* END 由 sender 处理，忽略重复 */ }
                 CarlifeFrame.CmdId.BOX_SEND_H264_REQUEST -> {
                     val req = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)

@@ -33,7 +33,7 @@ class VideoSender(private val conn: BoxConnection) {
     private var pausedByHeadUnit = false
     private var pausedByMobile = false
 
-    /** 发一帧：[12B 业务头][H.264] 直写视频通道（权威 writeVideoData(head,12,data)） */
+    /** 发一帧：12B 业务头 + H.264 直写视频通道（权威 writeVideoData(head,12,data)） */
     fun sendFrame(h264: ByteArray) {
         if (pausedByHeadUnit || pausedByMobile) return
         val head = buildHead(h264.size, TYPE_FOREGROUND)
