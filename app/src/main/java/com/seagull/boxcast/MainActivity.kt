@@ -106,6 +106,20 @@ class MainActivity : ComponentActivity() {
         }.start()
         com.seagull.boxcast.root.RootKeeper.startInAppGuard()
 
+        // 内置 HTTP 调试接口（127.0.0.1:9977）：/log /status /server/start /cast/start /mock
+        com.seagull.boxcast.debug.DebugHttpServer.castTrigger = {
+            runOnUiThread {
+                val mpm = getSystemService(MediaProjectionManager::class.java)
+                projectionLauncher.launch(mpm.createScreenCaptureIntent())
+            }
+        }
+        com.seagull.boxcast.debug.DebugHttpServer.stopTrigger = {
+            startService(Intent(this, ScreenCastService::class.java).apply {
+                action = ScreenCastService.ACTION_STOP
+            })
+        }
+        com.seagull.boxcast.debug.DebugHttpServer().start()
+
         setContent {
             MaterialTheme {
                 val rootStatus by com.seagull.boxcast.root.RootKeeper.status.collectAsState()
