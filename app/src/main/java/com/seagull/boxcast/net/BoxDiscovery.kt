@@ -133,8 +133,8 @@ class BoxDiscovery(private val context: Context) {
                         sock.broadcast = true
                         sock.bind(InetSocketAddress(UDP_PORT))
                         val buf = ByteArray(512)
-                        // scope.isActive 退出（原 while(true) 无退出 → socket 永久存活）
-                        while (scope.isActive) {
+                        // Job.isActive 退出（原 while(true) 无退出 → socket 永久存活）
+                        while (scope.coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
                             val p = DatagramPacket(buf, buf.size)
                             runCatching { sock.receive(p) }.getOrNull() ?: break
                             val text = String(p.data, 0, p.length)
