@@ -64,15 +64,21 @@ class ScreenCastService : Service() {
                     .setSmallIcon(R.drawable.ic_launcher)
                     .setOngoing(true)
                     .build()
-                // targetSdk 35 强制 FGS type（Android 14+）：mediaProjection 与 manifest 声明一致
+                // targetSdk 35 强制 FGS type（Android 14+）：mediaProjection 与 manifest 声明一致。
+                // **必须先 startForeground**——Android 14+ 规定 getMediaProjection 调用时
+                // FGS(mediaProjection) 必须已存在，否则 SecurityException
                 if (Build.VERSION.SDK_INT >= 29) {
                     startForeground(NOTIFY_ID, notif,
                         android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
                 } else {
                     startForeground(NOTIFY_ID, notif)
                 }
-                // MediaProjection 非 Parcelable → 全局持有取（MainActivity 授权后放入）
-                val mp = BoxConnectionHolder.projection
+                // FGS 已起，此刻 getMediaProjection 才合法
+                val mp = runCatching {
+                    val mpm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                    mpm.getMediaProjection(BoxConnectionHolder.projectionResultCode,
+                        BoxConnectionHolder.projectionData ?: error("projection data null"))
+                }.getOrNull()
                 if (mp == null) {
                     stopSelf(); return START_NOT_STICKY
                 }
@@ -280,8 +286,11 @@ object BoxConnectionHolder {
     var streamSource: com.seagull.boxcast.BoxStreamSource? = null
 
     /**
-     * MediaProjection 全局持有——**它不是 Parcelable**（AOSP 只 implements Closeable，
-     * 进程内对象），不能 Intent.putExtra 传递；同进程引用传递是标准做法。
+     * MediaProjection 授权结果全局持有（Android 14+ 正解）：
+     * Activity 授权回调里**不能**直接 getMediaProjection（FGS 未起 → SecurityException），
+     * 只存 resultCode+data；ScreenCastService 先 startForeground(MEDIA_PROJECTION)，
+     * 再在 Service 内 getMediaProjection 拿对象。
      */
-    var projection: android.media.projection.MediaProjection? = null
+    var projectionResultCode: Int = 0
+    var projectionData: android.content.Intent? = null
 }
