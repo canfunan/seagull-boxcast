@@ -46,7 +46,8 @@ public final class BoxStreamSource implements CanvasSource {
      * 独立解码线程消费；队列满丢最旧帧。
      */
     public static void postFrame(byte[] data, boolean key) {
-        BoxStreamSource self = com.seagull.boxcast.video.BoxConnectionHolder.streamSource;
+        // Kotlin object 的 var 对 Java 是 INSTANCE.getXxx()（不是静态字段）
+        BoxStreamSource self = com.seagull.boxcast.video.BoxConnectionHolder.INSTANCE.getStreamSource();
         if (self == null || !self.ready) return;
         self.frameQueue.offer(new Frame(data, key));
     }
