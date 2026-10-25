@@ -109,9 +109,13 @@ done
             Log.i(TAG, "权限已全授")
             return
         }
-        su("pm grant $PKG ${missing.joinToString(" ")}") { out ->
-            Log.i(TAG, "pm grant → $out")
+        // pm grant 一次只接受一个 permission——逐条授
+        missing.forEach { p ->
+            su("pm grant $PKG $p") { out ->
+                if (out.isNotEmpty()) Log.w(TAG, "grant $p → $out")
+            }
         }
+        Log.i(TAG, "pm grant 完成: ${missing.size} 项")
     }
 
     /** 特殊权限：悬浮窗 / 通知监听 / 无障碍（settings secure） */
@@ -128,7 +132,11 @@ done
         // Doze/待机白名单
         su("dumpsys deviceidle whitelist +$PKG") { }
         su("am set-standby-bucket $PKG active") { }
+        // MediaProjection 授权（root 下部分 ROM 可免弹窗；不支持的 ROM 忽略错误走正常弹窗）
+        su("appops set $PKG PROJECT_MEDIA allow") { }
+        su("appops set $PKG START_FOREGROUND allow") { }
         Log.i(TAG, "特殊权限已配置")
+        status.value = status.value.copy(dozeWhitelisted = true)
     }
 
     /** 部署 service.d 保活脚本（KernelSU/Magisk 开机常驻） */

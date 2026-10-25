@@ -94,10 +94,13 @@ class MainActivity : ComponentActivity() {
                 inj.screenHeight = m.heightPixels
             }
         }
-        requestRuntimePermissions()
-        // root 自授权 + 保活部署（内置，替代外部脚本）
+        // root 自授权 + 保活部署（内置）——**先 root 授，UI 弹窗只兜底剩下的**
+        // （su 命令阻塞，放工作线程；完成后再请求运行时权限，已授的不会重复弹）
         com.seagull.boxcast.root.RootKeeper.init(this)
-        com.seagull.boxcast.root.RootKeeper.setup(this)
+        Thread {
+            com.seagull.boxcast.root.RootKeeper.setup(this)
+            runOnUiThread { requestRuntimePermissions() }
+        }.start()
         com.seagull.boxcast.root.RootKeeper.startInAppGuard()
 
         setContent {
