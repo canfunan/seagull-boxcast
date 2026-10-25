@@ -33,24 +33,23 @@ class VideoSender(private val conn: BoxConnection) {
     private var pausedByHeadUnit = false
     private var pausedByMobile = false
 
-    /** 发一帧：12B 头 + H.264（channel 2） */
+    /** 发一帧：[12B 业务头][H.264] 直写视频通道（权威 writeVideoData(head,12,data)） */
     fun sendFrame(h264: ByteArray) {
         if (pausedByHeadUnit || pausedByMobile) return
         val head = buildHead(h264.size, TYPE_FOREGROUND)
-        conn.sendRawTwoPart(CarlifeFrame.CmdId.MSG_VIDEO_DATA, head, h264,
-            CarlifeFrame.Channel.VIDEO)
+        conn.sendRawData(CarlifeFrame.Channel.VIDEO, head, h264)
     }
 
     /** 前台空包（恢复推送/首连告知） */
     fun sendEmptyForeground() {
-        conn.sendRawTwoPart(CarlifeFrame.CmdId.MSG_VIDEO_DATA,
-            buildHead(0, TYPE_FOREGROUND), ByteArray(0), CarlifeFrame.Channel.VIDEO)
+        conn.sendRawData(CarlifeFrame.Channel.VIDEO,
+            buildHead(0, TYPE_FOREGROUND), ByteArray(0))
     }
 
     /** 后台空包（退后台告知车机） */
     fun sendEmptyBackground() {
-        conn.sendRawTwoPart(CarlifeFrame.CmdId.MSG_VIDEO_DATA,
-            buildHead(0, TYPE_BACKGROUND), ByteArray(0), CarlifeFrame.Channel.VIDEO)
+        conn.sendRawData(CarlifeFrame.Channel.VIDEO,
+            buildHead(0, TYPE_BACKGROUND), ByteArray(0))
     }
 
     /** 车机让暂停（MSG_CMD_VIDEO_ENCODER_PAUSE） */

@@ -94,13 +94,13 @@ class EncryptHandshake(private val conn: BoxConnection) {
     fun encryptIfEnabled(data: ByteArray): ByteArray {
         if (!enabled || data.isEmpty()) return data
         return BoxCrypto.encryptWithKey(seed.toByteArray(Charsets.UTF_8), data)
-            ?: throw IllegalStateException("encrypt fail (payload not 16B-aligned? size=${data.size})")
+            ?: throw IllegalStateException("encrypt fail (size=${data.size})")
     }
 
     /** 接收后解密（同上：失败抛错，不静默回落） */
     fun decryptIfEnabled(data: ByteArray): ByteArray {
         if (!enabled || data.isEmpty()) return data
         return BoxCrypto.decryptWithKey(seed.toByteArray(Charsets.UTF_8), data)
-            ?: throw IllegalStateException("decrypt fail (payload not 16B-aligned? size=${data.size})")
+            ?: throw IllegalStateException("decrypt fail (size=${data.size})")
     }
 }

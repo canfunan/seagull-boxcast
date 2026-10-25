@@ -41,8 +41,13 @@ object CarlifeFrame {
         const val BOX_CHECK_UPDATE_RES = 102417
         const val BOX_VEHCILE_STATE = 102418
 
-        // 反控（标准 CarLife 协议段，2021 f/y.java 实证）
-        const val TOUCH_ACTION = 425985                 // CarlifeTouchAction
+        // 反控（标准 CarLife 协议段，公签 f/y.java:46-104 全集实证）
+        const val TOUCH_ACTION = 425985                 // CarlifeTouchAction（含 down/move/up 由 proto action 区分）
+        const val TOUCH_ACTION_DOWN = 425986            // 单指按下
+        const val TOUCH_ACTION_MOVE = 425987            // 单指移动
+        const val TOUCH_ACTION_UP = 425988              // 单指抬起
+        const val TOUCH_ACTION_CLICK = 425989           // 单击
+        const val TOUCH_ACTION_DBL_CLICK = 425990       // 双击
         const val TOUCH_CAR_HARD_KEY_CODE = 425992      // CarlifeCarHardKeyCode
 
         // 标准视频流（Recorder.sendVideoData 实证：channel 2 + [12B 头][H.264] 两段）
@@ -172,16 +177,26 @@ object CarlifeFrame {
         ((b[off].toInt() and 0xFF) shl 8) or (b[off + 1].toInt() and 0xFF)
 }
 
-/** 外层帧读取器（流式，处理 TCP 半包/粘包） */
-class FrameReader {
-    private val header = ByteArray(8)
+/**
+ * 帧读取器（流式，处理 TCP 半包/粘包）。
+ *
+ * **TCP 模式（默认）**：车机/盒子 TCP 流**没有外层 8B 头**（三方权威实证：
+ * 2026 SocketCommunicator.java:98-112 / 公签 d/o.java:83-91 / vivo ConnectSocket.java:169-205
+ * 全部内层头直写）——先偷看首字节判断 8B(ch1/6) 还是 12B(ch2-5) 头，按头里 len 读满，
+ * 返回 (inferredChannel, 完整内层帧)。
+ *
+ * **AOA 模式**（useAoaFraming=true，留作 USB）：[channel:u32][len:u32] 外层。
+ */
+class FrameReader(private val useAoaFraming: Boolean = false) {
+    private val header = ByteArray(12)
     private var headerFilled = 0
 
-    /**
-     * 从输入流读一帧。返回 null 表示流结束。
-     * @return Pair(channel, payload)
-     */
+    /** TCP 模式：偷看首 12B 判定头型，读满整帧 */
     fun read(input: java.io.InputStream): Pair<Int, ByteArray>? {
+        return if (useAoaFraming) readAoa(input) else readTcp(input)
+    }
+
+    private fun readAoa(input: java.io.InputStream): Pair<Int, ByteArray>? {
         while (headerFilled < 8) {
             val n = input.read(header, headerFilled, 8 - headerFilled)
             if (n < 0) return null
@@ -201,6 +216,71 @@ class FrameReader {
         }
         headerFilled = 0
         return channel to payload
+    }
+
+    /**
+     * TCP：读 12B 探测窗（不足 8B 无法判定）→
+     *  ch1/6 帧：len=u16@0，总长 8+len
+     *  ch2-5/7 帧：len=u32@0，总长 12+len
+     * 返回 (inferredChannel, 完整内层帧 bytes)——调用方 parseInner(channel, bytes) 解析
+     */
+    private fun readTcp(input: java.io.InputStream): Pair<Int, ByteArray>? {
+        while (headerFilled < 12) {
+            val n = input.read(header, headerFilled, 12 - headerFilled)
+            if (n < 0) return null
+            headerFilled += n
+        }
+        // 判定：8B 头的 len 是 u16@0（≤0xFFFF），其 u32@0 高 16 位必为 0 且 serviceType 合理；
+        // 12B 头 len 是 u32@0。用 u32@0 高 16 位区分：0 → 可能 8B，也可能 12B 小帧。
+        // 稳妥判定（CarlifeCmdMessage.fromByteArray 同款）：先按 8B 解 serviceType@4，
+        // 若落在已知 ID 集 → 8B；否则按 12B（len@0, serviceType@8）
+        val len32 = CarlifeFrame.u32BE(header, 0)
+        val st8 = CarlifeFrame.u32BE(header, 4).toInt()
+        val is8B = len32 in 0..0xFFFFL && isPlausibleServiceType(st8)
+        if (is8B) {
+            val len = len32.toInt()
+            val total = 8 + len
+            val frame = ByteArray(total)
+            header.copyInto(frame, 0, 0, 8)
+            var filled = 8
+            while (filled < total) {
+                val n = input.read(frame, filled, total - filled)
+                if (n < 0) return null
+                filled += n
+            }
+            headerFilled = 0
+            return CarlifeFrame.Channel.CMD to frame   // ch1/6 统一按 CMD 解析
+        }
+        // 12B 头
+        val len = len32
+        require(len in 0..CarlifeFrame.MAX_FRAME) { "bad 12B len: $len" }
+        val total = 12 + len.toInt()
+        val frame = ByteArray(total)
+        header.copyInto(frame, 0, 0, 12)
+        var filled = 12
+        while (filled < total) {
+            val n = input.read(frame, filled, total - filled)
+            if (n < 0) return null
+            filled += n
+        }
+        headerFilled = 0
+        // channel 推断：服务端 6 端口各连一条 socket，此处读循环已按 socket 分通道；
+        // 单 socket 场景（客户端模式）统一 MEDIA 媒体判定交给调用方
+        return CarlifeFrame.Channel.MEDIA to frame
+    }
+
+    /** serviceType 合理性（8B 头判定用）：CarLife 已知 ID 段 */
+    private fun isPlausibleServiceType(st: Int): Boolean = when (st) {
+        in 65536..66000,        // MD→HU 段（655xx）
+        in 98304..98500,        // HU→MD 段（983xx/984xx）
+        in 102401..102418,      // 盒子段
+        in 131072..131075,      // 视频段
+        in 196608..196616,      // 音频段
+        in 262144..262152,      // TTS 段
+        in 327680..327690,      // VR 段
+        in 425984..425995,      // 反控段
+        -> true
+        else -> false
     }
 }
 

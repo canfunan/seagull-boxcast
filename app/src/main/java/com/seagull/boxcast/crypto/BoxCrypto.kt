@@ -63,16 +63,23 @@ object BoxCrypto {
     fun decrypt(data: ByteArray, len: Int = data.size): ByteArray? =
         runCatching { decryptCipher.get()!!.doFinal(data, 0, len) }.getOrNull()
 
-    /** 自定义密钥 AES/ECB（加密握手 seed 用；ThreadLocal 同款隔离） */
+    /** 标准握手加密（AES/ECB/PKCS5Padding——2026 AesEncryptor.java:41-44 权威） */
     fun encryptWithKey(key: ByteArray, data: ByteArray): ByteArray? = runCatching {
-        val c = Cipher.getInstance(TRANSFORMATION)
+        val c = Cipher.getInstance("AES/ECB/PKCS5Padding")
         c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"))
         c.doFinal(data)
     }.getOrNull()
 
     fun decryptWithKey(key: ByteArray, data: ByteArray): ByteArray? = runCatching {
-        val c = Cipher.getInstance(TRANSFORMATION)
+        val c = Cipher.getInstance("AES/ECB/PKCS5Padding")
         c.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"))
         c.doFinal(data)
     }.getOrNull()
+
+    /** 盒子链路专用（AES/ECB/NoPadding + 白盒 key——AESManagerBox.java:16-24 权威） */
+    fun encryptNoPadding(key: ByteArray, data: ByteArray): ByteArray? =
+        encrypt(data, data.size)   // ThreadLocal NoPadding 实例
+
+    fun decryptNoPadding(key: ByteArray, data: ByteArray): ByteArray? =
+        decrypt(data, data.size)
 }

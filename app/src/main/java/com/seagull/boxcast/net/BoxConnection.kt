@@ -76,8 +76,8 @@ class BoxConnection(private val appContext: Context) {
             CarlifeFrame.Channel.TTS to 9241,
             CarlifeFrame.Channel.VR to 9242,
             CarlifeFrame.Channel.TOUCH to 9340,
-            // DataAcceptThread（真机实证存在，端口 TODO-CALIBRATE：日志未打印，邻近段推测）
-            7 to 9341,
+            // Data 通道（WirlessConnector.java:22-29 权威：channel7=9440）
+            7 to 9440,
         )
     }
 
@@ -122,6 +122,8 @@ class BoxConnection(private val appContext: Context) {
 
     /** 盒子→手机 102405（请求 H.264 初始化）：应回 confirmH264Init() */
     var onH264ListRequest: (() -> Unit)? = null
+    /** 盒→手 102411 全部完成 */
+    var onH264AllDone: (() -> Unit)? = null
 
     /** 盒子→手机 102407（请求发送，带宽高/长度）：应回 sendH264Start() */
     var onH264SendRequest: ((com.seagull.boxcast.proto.BoxH264Send) -> Unit)? = null
@@ -178,13 +180,15 @@ class BoxConnection(private val appContext: Context) {
                                 if (old !== s) runCatching { old.close() }
                             }
                             Log.i(TAG, "AcceptThread ch=$channel accepted ${s.inetAddress}")
-                            // 该通道的读循环
-                            val r = FrameReader()
+                            // 该通道的读循环（TCP：内层头直读，读出的 channel 是推断值，
+                            // 用真实 socket 通道覆盖——服务端每 socket 一个通道）
+                            val r = FrameReader(useAoaFraming = false)
                             launch(Dispatchers.IO) {
                                 try {
                                     while (isActive) {
-                                        val (ch, payload) = r.read(s.getInputStream()) ?: break
-                                        handleFrame(ch, payload)
+                                        val (_chInferred, payload) = r.read(s.getInputStream()) ?: break
+                                        // TCP 读侧 channel 是推断值（8B/12B 判定），以 socket 通道为准
+                                        handleFrame(channel, payload)
                                     }
                                 } catch (e: Exception) {
                                     Log.e(TAG, "ch=$channel read end: ${e.message}")
@@ -255,7 +259,7 @@ class BoxConnection(private val appContext: Context) {
             s.connect(InetSocketAddress(host, port), 4000)
             socket = s
             out = s.getOutputStream()
-            reader = FrameReader()
+            reader = FrameReader(useAoaFraming = false)   // TCP：内层头直读
             if (!writeActive) startWriteThread()   // 幂等：客户端/服务端共用一条写线程
             startReadLoop(s.getInputStream())
             reconnectDelay = 1000L                  // 手动连上也重置退避（原仅 reconnect 重置）
@@ -319,8 +323,8 @@ class BoxConnection(private val appContext: Context) {
         readJob = scope.launch {
             try {
                 while (isActive) {
-                    val (channel, payload) = reader!!.read(input) ?: break
-                    handleFrame(channel, payload)
+                    val (channelInferred, payload) = reader!!.read(input) ?: break
+                    handleFrame(channelInferred, payload)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "read loop end: ${e.message}")
@@ -339,6 +343,10 @@ class BoxConnection(private val appContext: Context) {
         // 加密启用时解密（ConnectSocket 读侧对称处理）
         body = com.seagull.boxcast.frame.CmdMessage(body.serviceType,
             encryptHandshake.decryptIfEnabled(body.data))
+        if (body.serviceType == 131074) {
+            lastVideoHeartbeat = System.currentTimeMillis()   // 视频心跳（6s 监控）
+            return
+        }
         Log.i(TAG, "recv serviceType=${body.serviceType} len=${body.data.size}")
         // 单条消息解析失败不影响连接（畸形包/半包保护）
         runCatching {
@@ -349,6 +357,35 @@ class BoxConnection(private val appContext: Context) {
                 CarlifeFrame.CmdId.BOX_CHECK_UPDATE_RES -> { /* OTA 结果，交给上层解析 */ }
                 // 盒子→手机 H.264 点播请求（BoxH264Manager 实证方向）
                 CarlifeFrame.CmdId.BOX_H264LIST_REQUEST -> onH264ListRequest?.invoke()
+                // 盒→手 102404 分辨率列表 → 回 confirmResolution（BoxH264Manager.checkResolution:161-182）
+                CarlifeFrame.CmdId.BOX_H264_LIST -> {
+                    val list = BoxH264List.decode(body.data)
+                    Log.i(TAG, "box h264 list cnt=${list.cnt} infos=${list.h264Info}")
+                    if (list.cnt > 0 && list.h264Info.isNotEmpty()) {
+                        // 取第一个（最低档）确认，同 checkResolution 默认 848x480
+                        val (w0, h0) = list.h264Info.first()
+                        sendFrameWH(w0, h0)
+                        send(CarlifeFrame.CmdId.BOX_H264_LIST, BoxH264List(
+                            cnt = 1, h264Info = listOf(w0 to h0)).encode())
+                    }
+                }
+                // 盒→手 102411 全部完成（onH264AllDone）
+                CarlifeFrame.CmdId.BOX_H264_DONE -> {
+                    Log.i(TAG, "box h264 all done (102411)")
+                    onH264AllDone?.invoke()
+                }
+                // 标准 HU 握手起点（2026 ConnectionEstablishHandler.java:223-225）：
+                // HU 发 98305 → 手机回 65538 MATCH_STATUS{matchStatus=1}
+                CarlifeFrame.CmdId.MSG_CMD_HU_PROTOCOL_VERSION -> {
+                    Log.i(TAG, "HU protocol version (98305) → reply 65538 matchStatus=1")
+                    send(CarlifeFrame.CmdId.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS,
+                        com.seagull.boxcast.proto.Wire.Writer().int32(1, 1).toByteArray())
+                }
+                // 盗版盒/未激活处理（CarlifeConnectHsgHandler.java:931-995）：
+                // 0/1/2 → 日志警示（对话框 UI 后续加）
+                else if (body.serviceType == 0) { }
+                // HU 车辆激活（98432）回执占位
+                CarlifeFrame.CmdId.BOX_SEND_H264_END -> { /* END 由 sender 处理，忽略重复 */ }
                 CarlifeFrame.CmdId.BOX_SEND_H264_REQUEST -> {
                     val req = com.seagull.boxcast.proto.BoxH264Send.decode(body.data)
                     // 同步盒子分辨率到反控坐标映射（否则触摸坐标按默认 1920x1080 算全错）
@@ -361,9 +398,24 @@ class BoxConnection(private val appContext: Context) {
                     }
                     onH264SendRequest?.invoke(req)
                 }
-                // 反控：车机/盒子触摸与硬按键 → 注入手机
+                // 反控：车机/盒子触摸与硬按键 → 注入手机（协议族全集 f/y.java:46-104）
                 CarlifeFrame.CmdId.TOUCH_ACTION ->
                     InjectorRegistry.injector?.inject(TouchProto.TouchAction.decode(body.data))
+                CarlifeFrame.CmdId.TOUCH_ACTION_DOWN,
+                CarlifeFrame.CmdId.TOUCH_ACTION_MOVE,
+                CarlifeFrame.CmdId.TOUCH_ACTION_UP -> {
+                    // 单指 down/move/up：action 参数区分（1=down 2=move 3=up）
+                    val act = if (body.serviceType == CarlifeFrame.CmdId.TOUCH_ACTION_DOWN) 1
+                              else if (body.serviceType == CarlifeFrame.CmdId.TOUCH_ACTION_MOVE) 2 else 3
+                    val t = TouchProto.TouchAction.decode(body.data)
+                    InjectorRegistry.injector?.inject(t.copy(action = act))
+                }
+                CarlifeFrame.CmdId.TOUCH_ACTION_CLICK -> {
+                    // 单击： down+up（f/y.java 同款合成）
+                    val t = TouchProto.TouchAction.decode(body.data)
+                    InjectorRegistry.injector?.inject(t.copy(action = 1))
+                    InjectorRegistry.injector?.inject(t.copy(action = 3))
+                }
                 CarlifeFrame.CmdId.TOUCH_CAR_HARD_KEY_CODE ->
                     InjectorRegistry.injector?.injectKey(TouchProto.HardKeyCode.decode(body.data).keycode)
                 // 标准视频握手（HU → 手机）
@@ -418,11 +470,13 @@ class BoxConnection(private val appContext: Context) {
         Log.i(TAG, "verifyCode=$verifyCode")
 
         // 权威 verifyBoxTag:126-142：tag/verifyCode 为空或 !hasActive → 2(未激活)；
-        // tag≠code → 0(未授权)；active==0 → 1(未激活)；否则 3(已授权)
+        // tag≠code → 0(未授权)；active==0 → **1**(未激活，2026 车机报告修正)；
+        // 否则 3(已授权)
         var code = when {
-            verifyCode.isNullOrEmpty() || hello.tag.isEmpty() || hello.active == 0 ->
+            verifyCode.isNullOrEmpty() || hello.tag.isEmpty() ->
                 BoxTypes.IS_BOX_NOT_ACTIVATED          // 2
             hello.tag != verifyCode -> BoxTypes.IS_BOX_NOT_AUTHORIZED   // 0
+            hello.active == 0 -> BoxTypes.IS_BOX_VERSION_TOO_OLD        // 1（active 未开启）
             else -> BoxTypes.IS_BOX_AND_AUTHORIZED                      // 3
         }
         _state.value = State.Authorized(hello, code)
@@ -440,6 +494,13 @@ class BoxConnection(private val appContext: Context) {
                 DeviceInfo.encodeMdInfo(), CarlifeFrame.Channel.CMD)
         }
 
+        // ModuleStatus 上报（公签 f/i.java:53-76：modules 1/2/3/4/6 全 1）
+        runCatching {
+            val ms = com.seagull.boxcast.proto.Wire.Writer().apply {
+                int32(1, 1); int32(2, 1); int32(3, 1); int32(4, 1); int32(6, 1)
+            }.toByteArray()
+            send(CarlifeFrame.CmdId.MSG_CMD_MODULE_STATUS, ms)
+        }
         // Hello 后起心跳
         startHeartbeat()
     }
@@ -452,10 +513,14 @@ class BoxConnection(private val appContext: Context) {
 
     private fun send(serviceType: Int, payload: ByteArray, channel: Int = CarlifeFrame.Channel.CMD) {
         val secured = encryptHandshake.encryptIfEnabled(payload)
+        // **TCP 直写内层头**（三方权威实证：2026 SocketCommunicator.java:98-112 只读内层头；
+        // 公签 d/o.java:83-91 socket 模式只写数据本身；vivo ConnectSocket.java:169-205
+        // 只写 CarlifeCmdMessage+data）——外层 [channel][len] 是 USB AOA 专属，
+        // 原来每帧套外层 → 对真盒子/车机首帧即错位
         val body = if (USE_INNER_FRAME) {
-            CarlifeFrame.inner(serviceType, secured, channel)   // 双格式（ch1/6=8B，ch2-5=12B）
+            CarlifeFrame.inner(serviceType, secured, channel)
         } else secured
-        enqueue(CarlifeFrame.outer(channel, body), channel)
+        enqueue(body, channel)
     }
 
     /**
@@ -465,19 +530,17 @@ class BoxConnection(private val appContext: Context) {
      */
     fun sendRawData(channel: Int, head12: ByteArray, data: ByteArray) {
         require(head12.size == 12) { "data head must be 12B" }
-        val frame = ByteArray(8 + 12 + data.size)
-        CarlifeFrame.putU32BE(frame, 0, channel.toLong())
-        CarlifeFrame.putU32BE(frame, 4, (12 + data.size).toLong())
-        head12.copyInto(frame, 8)
-        data.copyInto(frame, 20)
+        // TCP：12B 业务头+data 直写（外层头仅 AOA；权威 ConnectSocket.writeData 实证）
+        val frame = ByteArray(12 + data.size)
+        head12.copyInto(frame, 0)
+        data.copyInto(frame, 12)
         enqueue(frame, channel)
     }
 
-    /** 102401 改帧宽高（sendWH2Box 复刻） */
+    /** 102401 改帧宽高（BoxConnectClient.java:178-186 权威：1=w,2=h,3=frameRate=10） */
     fun sendFrameWH(width: Int, height: Int) {
-        // 原版走 VideoSettingFragment 的 sendWH2Box；消息体以 102401 定义为准
         send(CarlifeFrame.CmdId.BOX_CHANGE_FRAME_WH, com.seagull.boxcast.proto.Wire.Writer()
-            .int32(1, width).int32(2, height).toByteArray())
+            .int32(1, width).int32(2, height).int32(3, 10).toByteArray())
     }
 
     /** 公开发送：盒子命令（内层+外层封装，默认 channel 1） */
@@ -496,16 +559,8 @@ class BoxConnection(private val appContext: Context) {
         val body = if (USE_INNER_FRAME) {
             CarlifeFrame.inner(serviceType, meta, channel)   // 双格式
         } else meta
-        val frame = if (USE_INNER_FRAME) {
-            // [channel][len(header+raw)] 头里 len 覆盖两段（与 d/o.java:83-91 一致）
-            val h = ByteArray(8)
-            CarlifeFrame.putU32BE(h, 0, channel.toLong())
-            CarlifeFrame.putU32BE(h, 4, (body.size + raw.size).toLong())
-            h + body + raw
-        } else {
-            CarlifeFrame.outer(channel, meta + raw)
-        }
-        enqueue(frame, channel)
+        // TCP：内层头+raw 直写（外层头仅 AOA）
+        enqueue(body + raw, channel)
     }
 
     /** 102402 视频心跳 */
@@ -536,7 +591,23 @@ class BoxConnection(private val appContext: Context) {
                 kotlinx.coroutines.delay(HEARTBEAT_MS)
             }
         }
+        // 入站心跳监测（权威 ConnectManager.java:592-620：视频通道 12B 头
+        // serviceType==131074，6s 超时断链）
+        hbJob = scope.launch {
+            while (isActive) {
+                kotlinx.coroutines.delay(6000)
+                if (System.currentTimeMillis() - lastVideoHeartbeat > 6000 &&
+                    state.value is State.Authorized) {
+                    Log.e(TAG, "video heartbeat timeout >6s → close")
+                    close()
+                    break
+                }
+            }
+        }
     }
+
+    /** 最近一次视频心跳（131074）时间戳；handleFrame 里收到就刷新 */
+    @Volatile private var lastVideoHeartbeat = 0L
 
     // ---------- 关闭 ----------
 

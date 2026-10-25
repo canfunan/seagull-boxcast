@@ -55,9 +55,9 @@ object BoxBleParser {
         return runCatching {
             // AES/ECB/NoPadding 解密前 16 字节（密钥走白盒钩子，默认原始 base64）
             val keyBytes = BoxCrypto.aesKey()
-            val cipher = Cipher.getInstance(BoxCrypto.TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"))
-            val dec = cipher.doFinal(value.copyOfRange(0, 16))
+            // 盒子链路白盒 AES/ECB/NoPadding（AESManagerBox.java:16-24 权威）
+            val dec = BoxCrypto.decryptNoPadding(keyBytes, value.copyOfRange(0, 16))
+                ?: return null
             // 解密结果再 XOR aesKey——**只 XOR min(16, keyBytes.size) 字节**
             // （原 k%size 环绕与权威不符；16B 密文场景巧合一致）
             val xorLen = minOf(16, keyBytes.size)

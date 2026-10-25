@@ -49,14 +49,20 @@ class H264Encoder(
         bitrate: Int = DEFAULT_BITRATE,
         fps: Int = DEFAULT_FPS,
     ) {
+        // 分辨率对齐（公签 u.java:29-47 权威：w%16==0 && h%8==0——
+        // 硬编解码器对奇数尺寸兼容性差）
+        val w = width - (width % 16)
+        val h = height - (height % 8)
         encoderThread = HandlerThread("H264Encoder").apply { start() }
         encoderHandler = Handler(encoderThread!!.looper)
 
-        val format = MediaFormat.createVideoFormat(MIME, width, height).apply {
+        val format = MediaFormat.createVideoFormat(MIME, w, h).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)   // 秒级；精确 IDR 间隔用 requestKeyFrame
+            // 公签 h/f.java:118-120：静止画面保持编码（息屏/静态桌面不断流）
+            setInteger(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 3_000_000)
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
             // 官方 Recorder 实证：Baseline profile + level 256（部分盒子/车机只解 Baseline，
             // 不设可能落到 High 导致花屏）
@@ -83,7 +89,7 @@ class H264Encoder(
             return
         }
         val vd = runCatching {
-            createVD(mp, width, height, inputSurface, encoderHandler)
+            createVD(mp, w, h, inputSurface, encoderHandler)
         }.onFailure { Log.e(TAG, "createVirtualDisplay fail（projection 可能已失效，需重新授权）: ${it.message}") }.getOrNull()
         if (vd == null) {
             stop()
@@ -93,10 +99,10 @@ class H264Encoder(
         com.seagull.boxcast.video.BoxConnectionHolder.virtualDisplay = vd
         running = true
         currentFps = fps
-        currentWidth = width
-        currentHeight = height
+        currentWidth = w
+        currentHeight = h
         currentBitrate = bitrate
-        Log.i(TAG, "encoder started ${width}x$height @${fps}fps ${bitrate}bps")
+        Log.i(TAG, "encoder started ${w}x$h (req ${width}x$height) @${fps}fps ${bitrate}bps")
     }
 
     @Volatile var currentFps = DEFAULT_FPS
