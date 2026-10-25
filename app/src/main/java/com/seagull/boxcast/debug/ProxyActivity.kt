@@ -24,8 +24,12 @@ class ProxyActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // 透明无动画
+        // 必须挂个 1px view：纯透明 Activity 无窗口，某些 ROM 不会真正创建它
+        window.setContentView(android.view.View(this))
         overridePendingTransition(0, 0)
+        // 清掉已死的 VD 缓存（CompositionEngine -19 = ENODEV 实证）
+        BoxConnectionHolder.virtualDisplay?.let { runCatching { it.release() } }
+        BoxConnectionHolder.virtualDisplay = null
         val mpm = getSystemService(MediaProjectionManager::class.java)
         @Suppress("DEPRECATION")
         startActivityForResult(mpm.createScreenCaptureIntent(), REQ)

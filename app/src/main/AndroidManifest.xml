@@ -80,7 +80,7 @@
             android:name=".debug.ProxyActivity"
             android:excludeFromRecents="true"
             android:exported="false"
-            android:noHistory="true"
+            android:taskAffinity=".proxy"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- 通知监听：读系统 MediaSession 供车机 HUD 显示歌曲（需用户在设置里开启） -->
