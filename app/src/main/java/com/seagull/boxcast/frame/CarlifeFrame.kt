@@ -82,6 +82,14 @@ object CarlifeFrame {
         const val MSG_CMD_HU_RSA_PUBLIC_KEY_RESPONSE = 98411
         const val MSG_CMD_HU_AES_REC_RESPONSE = 98413
 
+        // 标准 HU 鉴权（耘电盒子 ConnectionEstablishHandler 实证：
+        // 盒子发 98376 AUTH_REQUEST{randomValue} → 手机回 65609 AuthenResponse{encryptValue}
+        // → 盒子发 98378 AUTH_RESULT → 手机回 65611 AuthenResult{authenResult=1}）
+        const val MSG_CMD_HU_AUTH_REQUEST = 98376
+        const val MSG_CMD_MD_AUTH_RESPONSE = 65609
+        const val MSG_CMD_HU_AUTH_RESULT = 98378
+        const val MSG_CMD_MD_AUTH_RESULT = 65611
+
         // 车机 HUD 增强（std 权威 ID）
         const val MSG_CMD_MEDIA_INFO = 65589      // 当前歌曲（MediaSession 读取）
         const val MSG_CMD_MODULE_STATUS = 65574   // 模块状态

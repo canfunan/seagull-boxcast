@@ -51,6 +51,7 @@ class BoxConnection(private val appContext: Context) {
 
     companion object {
         private const val TAG = "BoxConnection"
+        private const val MAX_PACKET_SIZE = 10240   // 盒子端 SocketCommunicator 权威
 
         /** TODO-CALIBRATE: 盒子数据端口 */
         val DATA_PORT_CANDIDATES = listOf(7240, 8240, 9340, 9800, 18899, 40001)
@@ -289,7 +290,14 @@ class BoxConnection(private val appContext: Context) {
                 runCatching {
                     // 服务端模式：按 channel 路由到对应 socket；客户端模式：bos
                     val target = channelOut(ch) ?: if (serverSockets.isNotEmpty()) return@runCatching else bos ?: return@runCatching
-                    target.write(frame)
+                    // 写分片（盒子端 SocketCommunicator.MAX_PACKET_SIZE=10240 权威）：
+                    // 单帧 >10KB（大 IDR/音频批量）必须分片，否则对端 blockRead 收不满
+                    var off = 0
+                    while (off < frame.size) {
+                        val n = minOf(MAX_PACKET_SIZE, frame.size - off)
+                        target.write(frame, off, n)
+                        off += n
+                    }
                     target.flush()
                 }.onFailure {
                     Log.e(TAG, "write fail, disconnect: ${it.message}")
@@ -333,6 +341,17 @@ class BoxConnection(private val appContext: Context) {
         }
     }
 
+    /** 读 proto 字符串字段（Wire.Reader 单字段提取） */
+    private fun readStringField(data: ByteArray, field: Int): String? = runCatching {
+        val r = com.seagull.boxcast.proto.Wire.Reader(data)
+        while (!r.atEnd()) {
+            val (f, w) = r.readTag()
+            if (f == field && w == 2) return r.readString()
+            r.skip(w)
+        }
+        null
+    }.getOrNull()
+
     private fun handleFrame(channel: Int, payload: ByteArray) {
         var body = if (USE_INNER_FRAME) {
             parseInner(payload, channel) ?: return
@@ -375,11 +394,31 @@ class BoxConnection(private val appContext: Context) {
                     Log.i(TAG, "box h264 all done (102411)")
                     onH264AllDone?.invoke()
                 }
-                // 标准 HU 握手起点（2026 ConnectionEstablishHandler.java:223-225）：
-                // HU 发 98305 → 手机回 65538 MATCH_STATUS{matchStatus=1}
+                // 标准 HU 握手起点（耘电盒子 ConnectionEstablishHandler.java:110-112 实证）：
+                // 盒子发 98305 → 手机回 65538 MATCH_STATUS{matchStatus=1}
                 CarlifeFrame.CmdId.MSG_CMD_HU_PROTOCOL_VERSION -> {
                     Log.i(TAG, "HU protocol version (98305) → reply 65538 matchStatus=1")
                     send(CarlifeFrame.CmdId.MSG_CMD_PROTOCOL_VERSION_MATCH_STATUS,
+                        com.seagull.boxcast.proto.Wire.Writer().int32(1, 1).toByteArray())
+                    // 版本匹配后立刻上报 MD_INFO（盒子不等 Hello——它不发 102403）
+                    runCatching {
+                        send(CarlifeFrame.CmdId.MSG_CMD_MD_INFO, DeviceInfo.encodeMdInfo())
+                    }
+                }
+                // 标准 HU 鉴权 step1（ConnectionEstablishHandler.java:182-190 实证）：
+                // 盒子发 98376{randomValue} → 手机回 65609{encryptValue}
+                CarlifeFrame.CmdId.MSG_CMD_HU_AUTH_REQUEST -> {
+                    val rand = readStringField(body.data, 1)
+                    Log.i(TAG, "HU auth request (98376) randomValue=$rand")
+                    val encryptValue = com.seagull.boxcast.crypto.VerifyCode.fallback(rand ?: "")
+                    send(CarlifeFrame.CmdId.MSG_CMD_MD_AUTH_RESPONSE,
+                        com.seagull.boxcast.proto.Wire.Writer().string(1, encryptValue).toByteArray())
+                    Log.i(TAG, "→ 65609 AuthenResponse encryptValue=$encryptValue")
+                }
+                // 标准 HU 鉴权 step2：盒子发 98378{AUTH_RESULT} → 手机回 65611{authenResult=1}
+                CarlifeFrame.CmdId.MSG_CMD_HU_AUTH_RESULT -> {
+                    Log.i(TAG, "HU auth result (98378) → reply 65611 authenResult=1")
+                    send(CarlifeFrame.CmdId.MSG_CMD_MD_AUTH_RESULT,
                         com.seagull.boxcast.proto.Wire.Writer().int32(1, 1).toByteArray())
                 }
                 // 盗版盒/未激活处理（CarlifeConnectHsgHandler.java:931-995）：
