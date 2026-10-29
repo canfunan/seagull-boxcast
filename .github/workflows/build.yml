@@ -31,8 +31,13 @@ jobs:
       - name: Build Debug APK
         run: gradle :app:assembleDebug --no-daemon
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Upload APK to Release
+        # Actions artifact 配额 500MB 且计量 6-12h 才刷新，曾连爆两次 → 改传 Release：
+        # Release 资产不计入 Actions 存储配额，tag 前缀 = commit sha 可追溯
+        uses: softprops/action-gh-release@v2
         with:
-          name: SeagullBoxCast-apk
-          path: app/build/outputs/apk/debug/*.apk
+          tag_name: ci-${{ github.sha }}
+          name: CI build ${{ github.sha }}
+          files: app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
