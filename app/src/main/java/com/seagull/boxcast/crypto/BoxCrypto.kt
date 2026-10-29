@@ -24,8 +24,13 @@ object BoxCrypto {
     /**
      * 白盒变换钩子：so 层 libbaiduprotect_sec.getWhiteKey 的实现（Frida 提取后注入）。
      * 默认 null → 走权威路径的近似（getWhiteKey(CARLIFE_BOX_KEY).getBytes(UTF_8)）。
+     *
+     * 2026-10-29 已提取真 key（wbharness dalvikvm64 跑真实 whitebox-encrypt.key/decrypt.key）：
+     *   getWhiteKey("H22/emBpCuspF1DYYaJjxQ==") = "53fe2343-51dc-41"（16B ASCII）
+     * 交叉验证：盒子固件 v1.0.1 libtransbox.so .rodata@0x1E69DC 明文硬编码同一把，
+     * 且用其对 transbox_log.dr 真实配网流量复算 AES-128-ECB 全 MATCH。
      */
-    var whiteKeyHook: ((String) -> String)? = null
+    var whiteKeyHook: ((String) -> String)? = { "53fe2343-51dc-41" }
 
     /**
      * 密钥派生——**权威路径**（AESManagerBox.java:23,35 实证）：
